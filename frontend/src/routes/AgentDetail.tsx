@@ -50,6 +50,15 @@ export function AgentDetailPage() {
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
 
+  const [directivesPrompt, setDirectivesPrompt] = useState<string | null>(null);
+  const [directivesLoading, setDirectivesLoading] = useState(false);
+  const [directivesError, setDirectivesError] = useState<{
+    status?: number;
+    kind?: string;
+    message: string;
+  } | null>(null);
+  const [directivesAliasFetched, setDirectivesAliasFetched] = useState<string | null>(null);
+
   const decoded = useMemo(() => {
     try {
       return decodeURIComponent(slug);
@@ -245,6 +254,48 @@ export function AgentDetailPage() {
     };
   }, [session, viewingAs.alias]);
 
+  // Directives: lazy-fetch the agent's composed prompt via `gc prime`.
+  // Cached for the lifetime of the page (no auto-refresh); operator can
+  // manually re-pull. Bail out (render nothing) when there's no alias
+  // candidate — `gc prime` is alias-keyed, not id-keyed.
+  const primeAlias = useMemo<string | null>(() => {
+    if (session === null) return null;
+    return session.alias ?? session.template ?? null;
+  }, [session]);
+
+  const refreshDirectives = useCallback(async () => {
+    if (primeAlias === null) return;
+    setDirectivesLoading(true);
+    setDirectivesError(null);
+    try {
+      const result = await api.agentPrime(primeAlias);
+      setDirectivesPrompt(result.prompt);
+      setDirectivesAliasFetched(primeAlias);
+    } catch (err) {
+      const status = err instanceof ApiClientError ? err.status : undefined;
+      const kind = err instanceof ApiClientError ? err.kind : undefined;
+      const message =
+        err instanceof ApiClientError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'directives fetch failed';
+      setDirectivesError({ status, kind, message });
+      setDirectivesPrompt(null);
+      setDirectivesAliasFetched(primeAlias);
+    } finally {
+      setDirectivesLoading(false);
+    }
+  }, [primeAlias]);
+
+  useEffect(() => {
+    if (primeAlias === null) return;
+    // Only fetch the first time we see this alias — page-lifetime cache.
+    // Manual Refresh button is the documented re-pull path.
+    if (directivesAliasFetched === primeAlias) return;
+    void refreshDirectives();
+  }, [primeAlias, directivesAliasFetched, refreshDirectives]);
+
   const chatMessages = useMemo<ReadonlyArray<GcMailItem>>(() => {
     if (chatItems === null) return [];
     const agents = new Set(agentAliases);
@@ -355,6 +406,16 @@ export function AgentDetailPage() {
         now={now}
         onRefresh={() => void refreshPeek()}
       />
+
+      {primeAlias !== null && (
+        <Directives
+          alias={primeAlias}
+          prompt={directivesPrompt}
+          loading={directivesLoading}
+          error={directivesError}
+          onRefresh={() => void refreshDirectives()}
+        />
+      )}
 
       <ChatThread
         messages={chatMessages}
@@ -561,6 +622,67 @@ function ChatThread({
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+function Directives({
+  alias,
+  prompt,
+  loading,
+  error,
+  onRefresh,
+}: {
+  alias: string;
+  prompt: string | null;
+  loading: boolean;
+  error: { status?: number; kind?: string; message: string } | null;
+  onRefresh: () => void;
+}) {
+  const isNotFound = error?.status === 404 || error?.kind === 'not_found';
+  const charsLabel =
+    prompt !== null
+      ? `${prompt.length.toLocaleString()} chars`
+      : loading
+        ? 'loading'
+        : error !== null
+          ? '—'
+          : '·';
+
+  return (
+    <section className="mt-12">
+      <header className="flex items-baseline justify-between mb-4">
+        <h2 className="text-label uppercase tracking-wider text-fg-faint">
+          Directives
+        </h2>
+        <div className="flex items-baseline gap-3">
+          <span className="text-label uppercase tracking-wider text-fg-faint tnum">
+            {charsLabel}
+          </span>
+          <Button size="sm" tone="quiet" onClick={onRefresh} disabled={loading}>
+            {loading ? 'Refreshing' : 'Refresh'}
+          </Button>
+        </div>
+      </header>
+      {loading && prompt === null && error === null ? (
+        <p className="text-body text-fg-muted italic">Loading directives.</p>
+      ) : isNotFound ? (
+        <p className="text-body text-warn">
+          Agent <code className="text-fg">{alias}</code> has no entry in city
+          config.
+        </p>
+      ) : error !== null ? (
+        <p className="text-body text-accent" role="alert">
+          {error.status ? `${error.status} ` : ''}
+          {error.message}
+        </p>
+      ) : prompt !== null ? (
+        <pre
+          className="text-body whitespace-pre-wrap leading-relaxed text-fg overflow-x-auto max-h-[60vh] overflow-y-auto"
+        >
+          {prompt}
+        </pre>
+      ) : null}
     </section>
   );
 }

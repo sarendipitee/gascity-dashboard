@@ -16,6 +16,12 @@ export interface AdminConfig {
   gcSupervisorUrl: string;
   /** Name of the city this admin dashboard manages. */
   cityName: string;
+  /**
+   * Optional absolute path to the city directory, passed as `gc prime --city=<path>`.
+   * When unset, `gc` walks up from cwd to discover the city. Set via GC_CITY_PATH
+   * for headless / systemd contexts where cwd is unrelated to the city tree.
+   */
+  cityPath: string;
   /** Path to .gc/events.jsonl for audit-log append. */
   auditLogPath: string;
   /** Path to the dist/ of the frontend build, served by express.static. */
@@ -40,6 +46,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
     extraAllowedHosts,
     gcSupervisorUrl: (env.GC_SUPERVISOR_URL ?? 'http://127.0.0.1:8372').replace(/\/+$/, ''),
     cityName: env.GC_CITY_NAME ?? 'gas-city',
+    cityPath: env.GC_CITY_PATH ?? '',
     auditLogPath:
       env.ADMIN_AUDIT_LOG_PATH ?? process.env.HOME ? `${process.env.HOME}/.gc/events.jsonl` : '.gc/events.jsonl',
     frontendDistPath: env.ADMIN_FRONTEND_DIST ?? '../frontend/dist',

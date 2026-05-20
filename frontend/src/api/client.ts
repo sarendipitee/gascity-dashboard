@@ -10,6 +10,7 @@ import type {
   DeployList,
   SystemHealth,
   DoltNomsTrend,
+  KanbanResponse,
   ApiError,
 } from 'gas-city-dashboard-shared';
 
@@ -153,5 +154,11 @@ export const api = {
   },
   doltTrend(): Promise<DoltNomsTrend> {
     return request('GET', '/api/dolt-noms/trend');
+  },
+  agentPrime(alias: string): Promise<{ agent: string; prompt: string; bytes: number }> {
+    return request('GET', `/api/agents/${encodeURIComponent(alias)}/prime`);
+  },
+  kanban(): Promise<KanbanResponse> {
+    return request('GET', '/api/admin/kanban');
   },
 };

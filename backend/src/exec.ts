@@ -201,6 +201,49 @@ export async function execAgentNudge(alias: string): Promise<ExecResult> {
   }
 }
 
+/**
+ * `gc prime --strict <alias>` — outputs the composed behavioural prompt
+ * for an agent (the same text the agent reads on wake). gascity-dashboard-vq7
+ * read-only surface: the dashboard surfaces the resolved prompt without
+ * exposing an edit path (edits would need a file-write privilege the
+ * exec whitelist deliberately doesn't grant — filed for follow-up
+ * behind security review).
+ *
+ * --strict so 'agent not in city config' surfaces as exit=1 +
+ * stderr (caller renders "not configured") instead of gc's default
+ * fallback to a generic worker prompt that would mislead the operator.
+ *
+ * cityPath is optional. When omitted, `gc` walks up from cwd to
+ * discover the city (matches the behaviour of the other exec helpers
+ * in this file, which don't pin --city). When present, it must be an
+ * absolute path with no `..` traversal segments.
+ *
+ * Output size: measured ~15KB for the mayor's prompt; well under
+ * runExec's 100KB MAX_BYTES.
+ */
+export async function execAgentPrime(
+  alias: string,
+  cityPath?: string,
+): Promise<ExecResult> {
+  if (!AGENT_ALIAS_RE.test(alias)) {
+    throw new ExecError('invalid agent alias', 'validation');
+  }
+  const args: string[] = ['prime', '--strict'];
+  if (cityPath !== undefined && cityPath.length > 0) {
+    if (!cityPath.startsWith('/') || cityPath.includes('..')) {
+      throw new ExecError('invalid city path', 'validation');
+    }
+    args.push(`--city=${cityPath}`);
+  }
+  args.push(alias);
+  await acquireSlot();
+  try {
+    return await runExec('gc', args, 10_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
 // PHYSICAL SEPARATION (security_researcher td-wisp-eb0pn): mail-send is its
 // OWN wrapper, deliberately with NO `from` / `as` parameter in its
 // signature. The --from human pin is the SECOND belt — even if some
@@ -286,6 +329,73 @@ export async function execGitLog(view: string): Promise<ExecResult> {
   await acquireSlot();
   try {
     return await runExec('git', ['-C', GIT_REPO_PATH, ...args], 10_000);
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gc bd list --status=closed --closed-after=<iso> --json` — only source
+ * of `closed_at` timestamps. The supervisor's HTTP /beads omits
+ * `closed_at` on closed beads, so the Kanban's `closed_24h` column has
+ * to reach into the bd CLI. Mirrors the upstream wrapper from
+ * Wldc4rd/citadel exec.ts:execBdListClosed.
+ *
+ * `cityPath` is the absolute path to the city root (--city=<name> is
+ * interpreted as a relative path, not a registered-city lookup).
+ *
+ * `closedAfter` is an ISO-8601 instant (e.g. "2026-05-19T10:00:00Z").
+ */
+export async function execBdListClosed(
+  cityPath: string,
+  closedAfter: string,
+  limit: number,
+): Promise<ExecResult> {
+  // Defensive: cityPath comes from server config, but treat it as
+  // untrusted anyway — block '..' segments and require an absolute path.
+  // exec.ts is the choke point; centralising the check here makes any
+  // future caller safe.
+  if (!cityPath.startsWith('/') || cityPath.includes('..')) {
+    throw new ExecError('invalid city path', 'validation');
+  }
+  // closedAfter is rendered server-side from `new Date().toISOString()`
+  // and isn't user input today, but defend the boundary anyway — the
+  // regex matches an ISO instant and nothing else, so no shell or flag
+  // injection slips in even if the source ever changes.
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(closedAfter)) {
+    throw new ExecError('invalid closed-after timestamp', 'validation');
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 5000) {
+    throw new ExecError('invalid limit', 'validation');
+  }
+  await acquireSlot();
+  try {
+    // --exclude-label=order-tracking AND --exclude-type=session,message,convoy:
+    // pre-filter system noise upstream so the JSON output fits within
+    // runExec's MAX_BYTES cap. Without the type-exclusion, session beads
+    // (~3-5KB each, hundreds per 24h window) blow past 100KB long before
+    // any limit takes effect. The JS-side filter in routes/admin.ts still
+    // applies the final pass — these excludes are a bandwidth saver, not
+    // the source of truth.
+    //
+    // --sort=closed: closed beads come back most-recent first; the
+    // Kanban classifier needs newest-first ordering for the 24h column.
+    return await runExec(
+      'gc',
+      [
+        'bd',
+        'list',
+        `--city=${cityPath}`,
+        '--status=closed',
+        `--closed-after=${closedAfter}`,
+        '--exclude-label=order-tracking',
+        '--exclude-type=session,message,convoy',
+        '--sort=closed',
+        `--limit=${limit}`,
+        '--json',
+      ],
+      15_000,
+    );
   } finally {
     releaseSlot();
   }
