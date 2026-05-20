@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { GcBead } from 'gas-city-dashboard-shared';
 import { api, ApiClientError } from '../api/client';
+import { BeadDetailModal } from '../components/BeadDetailModal';
 import { Button } from '../components/Button';
 import { FilterChips } from '../components/FilterChips';
 import { GroupedTable } from '../components/GroupedTable';
@@ -46,6 +47,7 @@ export function BeadsPage() {
   const [closeReason, setCloseReason] = useState('');
   const [actionInFlight, setActionInFlight] = useState<{ id: string; action: string } | null>(null);
   const [actionResult, setActionResult] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<GcBead | null>(null);
 
   const filteredRows = useMemo(() => {
     if (labelFilter === null) return rows;
@@ -112,7 +114,14 @@ export function BeadsPage() {
       sortValue: (r) => r.title,
       render: (r) => (
         <div className="min-w-0">
-          <p className="text-fg truncate">{r.title}</p>
+          <button
+            type="button"
+            onClick={() => setViewing(r)}
+            className="text-fg truncate hover:text-accent focus-mark text-left"
+            title={`Open ${r.id}`}
+          >
+            {r.title}
+          </button>
           <p className="text-label uppercase tracking-wider text-fg-faint mt-1 truncate">
             {r.issue_type}
             {r.assignee ? ` · ${r.assignee}` : ''}
@@ -302,6 +311,13 @@ export function BeadsPage() {
         }
         perProjectEmpty="No beads in this project."
         initialSort={{ key: 'updated', dir: 'desc' }}
+      />
+
+      <BeadDetailModal
+        open={viewing !== null}
+        onClose={() => setViewing(null)}
+        beadId={viewing?.id ?? null}
+        initialBead={viewing}
       />
 
       <Modal

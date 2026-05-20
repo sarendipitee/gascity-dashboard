@@ -117,6 +117,9 @@ export const api = {
     const qs = showAll ? '?showAll=1' : '';
     return request('GET', `/api/beads${qs}`);
   },
+  getBead(id: string): Promise<GcBead> {
+    return request('GET', `/api/beads/${encodeURIComponent(id)}`);
+  },
   claimBead(id: string): Promise<{ ok: true; stdout: string }> {
     return request('POST', `/api/beads/${encodeURIComponent(id)}/claim`, {});
   },

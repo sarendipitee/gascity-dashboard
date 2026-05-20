@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { KanbanCard, KanbanColumn, KanbanResponse } from 'gas-city-dashboard-shared';
 import { KANBAN_COLUMNS } from 'gas-city-dashboard-shared';
 import { api } from '../api/client';
+import { BeadDetailModal } from '../components/BeadDetailModal';
 import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { StatusBadge } from '../components/StatusBadge';
@@ -55,6 +55,7 @@ export function KanbanPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [viewingBeadId, setViewingBeadId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -143,10 +144,22 @@ export function KanbanPage() {
       {data !== null && (
         <div className="flex gap-10 overflow-x-auto pb-4 -mx-2 px-2">
           {KANBAN_COLUMNS.map((col) => (
-            <Column key={col} col={col} cards={data.columns[col]} now={now} />
+            <Column
+              key={col}
+              col={col}
+              cards={data.columns[col]}
+              now={now}
+              onSelect={setViewingBeadId}
+            />
           ))}
         </div>
       )}
+
+      <BeadDetailModal
+        open={viewingBeadId !== null}
+        onClose={() => setViewingBeadId(null)}
+        beadId={viewingBeadId}
+      />
     </section>
   );
 }
@@ -155,10 +168,12 @@ function Column({
   col,
   cards,
   now,
+  onSelect,
 }: {
   col: KanbanColumn;
   cards: ReadonlyArray<KanbanCard>;
   now: number;
+  onSelect: (id: string) => void;
 }) {
   return (
     <section className="shrink-0 w-64 space-y-3">
@@ -183,7 +198,7 @@ function Column({
       ) : (
         <ul className="divide-y divide-rule">
           {cards.map((c) => (
-            <Card key={c.id} card={c} column={col} now={now} />
+            <Card key={c.id} card={c} column={col} now={now} onSelect={onSelect} />
           ))}
         </ul>
       )}
@@ -195,21 +210,24 @@ function Card({
   card,
   column,
   now,
+  onSelect,
 }: {
   card: KanbanCard;
   column: KanbanColumn;
   now: number;
+  onSelect: (id: string) => void;
 }) {
   // Two-line typographic row: title + id on the first line, meta on
   // the second. Hover surface is a subtle tint, not a border-box —
   // hierarchy is carried by space and weight, the way the page does
-  // it everywhere else.
+  // it everywhere else. Click opens the bead detail modal.
   return (
     <li className="py-2 hover:bg-surface-tint -mx-2 px-2 rounded-sm transition-colors duration-150 ease-out-quart">
-      <Link
-        to="/beads"
-        className="block focus-mark rounded-sm"
-        title={`Open the bead list and find ${card.id}`}
+      <button
+        type="button"
+        onClick={() => onSelect(card.id)}
+        className="block w-full text-left focus-mark rounded-sm"
+        title={`Open ${card.id}`}
       >
         <div className="flex items-baseline gap-2">
           <PriorityMark priority={card.priority} />
@@ -237,7 +255,7 @@ function Card({
             </span>
           </div>
         </div>
-      </Link>
+      </button>
     </li>
   );
 }

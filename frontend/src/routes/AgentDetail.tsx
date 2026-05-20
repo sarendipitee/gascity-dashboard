@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { GcBead, GcMailItem, GcSession, TranscriptResult } from 'gas-city-dashboard-shared';
 import { effectiveContextPct } from 'gas-city-dashboard-shared';
 import { api, ApiClientError } from '../api/client';
+import { BeadDetailModal } from '../components/BeadDetailModal';
 import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { SessionPeekContent, formatPeekChars } from '../components/SessionPeek';
@@ -39,6 +40,7 @@ export function AgentDetailPage() {
   const [sessions, setSessions] = useState<GcSession[] | null>(null);
   const [beads, setBeads] = useState<GcBead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [viewingBead, setViewingBead] = useState<GcBead | null>(null);
 
   const [peekResult, setPeekResult] = useState<TranscriptResult | null>(null);
   const [peekFetchedAt, setPeekFetchedAt] = useState<number | null>(null);
@@ -396,7 +398,11 @@ export function AgentDetailPage() {
 
       <Metadata session={session} now={now} />
 
-      <BeadsAssigned beads={assignedBeads} loading={beads === null} />
+      <BeadsAssigned
+        beads={assignedBeads}
+        loading={beads === null}
+        onSelect={setViewingBead}
+      />
 
       <LivePeek
         result={peekResult}
@@ -422,6 +428,13 @@ export function AgentDetailPage() {
         loading={chatLoading && chatItems === null}
         error={chatError}
         now={now}
+      />
+
+      <BeadDetailModal
+        open={viewingBead !== null}
+        onClose={() => setViewingBead(null)}
+        beadId={viewingBead?.id ?? null}
+        initialBead={viewingBead}
       />
     </section>
   );
@@ -477,9 +490,11 @@ function Metadata({ session, now }: { session: GcSession; now: number }) {
 function BeadsAssigned({
   beads,
   loading,
+  onSelect,
 }: {
   beads: ReadonlyArray<GcBead>;
   loading: boolean;
+  onSelect: (bead: GcBead) => void;
 }) {
   return (
     <section className="mb-12">
@@ -502,13 +517,14 @@ function BeadsAssigned({
               <span className="text-label uppercase tracking-wider text-fg-faint tnum shrink-0">
                 {b.id}
               </span>
-              <Link
-                to={`/beads?focus=${encodeURIComponent(b.id)}`}
-                className="text-body text-fg hover:text-accent truncate min-w-0"
-                title={b.title}
+              <button
+                type="button"
+                onClick={() => onSelect(b)}
+                className="text-body text-fg hover:text-accent truncate min-w-0 text-left focus-mark"
+                title={`Open ${b.id}`}
               >
                 {b.title}
-              </Link>
+              </button>
               <span className="text-label uppercase tracking-wider text-fg-faint shrink-0">
                 {b.status}
               </span>

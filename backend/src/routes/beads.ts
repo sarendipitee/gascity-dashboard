@@ -62,6 +62,49 @@ export function beadsRouter(gc: GcClient): Router {
     }
   });
 
+  // Single bead read-through for the click-to-detail modal. Bead ids in
+  // this city come in mixed shapes (gc-123, agent-diagnostics-y84, td-abc),
+  // so the gc-CLI BEAD_ID_RE is too narrow — validate against a permissive
+  // alphanumeric+separator regex sized to the supervisor's actual id range.
+  const READ_BEAD_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
+  router.get('/:id', async (req, res) => {
+    const id = req.params.id;
+    if (!READ_BEAD_ID_RE.test(id)) {
+      res.status(400).json({ error: 'invalid bead id', kind: 'validation' });
+      return;
+    }
+    try {
+      const bead = await gc.getBead(id);
+      res.json(bead);
+    } catch (err) {
+      if (GcClient.isTimeoutError(err)) {
+        res.status(504).json({ error: 'gc supervisor did not respond in time', kind: 'upstream-timeout' });
+        return;
+      }
+      const msg = (err as Error).message;
+      // Supervisor quirk: workflow/orchestration beads (gc-NNNN ids) are
+      // returned by /beads but 404 on /bead/{id}. Fall back to a list scan
+      // so the modal works on every bead the user can see in any list.
+      // The list call is coalesced by GcClient.getJson, so concurrent
+      // fallbacks share one upstream request.
+      if (/\b404\b/.test(msg)) {
+        try {
+          const list = await gc.listBeads(undefined, { limit: 2000 });
+          const hit = list.items.find((b) => b.id === id);
+          if (hit) {
+            res.json(hit);
+            return;
+          }
+        } catch {
+          // fall through to the 404 below
+        }
+        res.status(404).json({ error: 'bead not found', kind: 'not_found' });
+        return;
+      }
+      res.status(502).json({ error: 'failed to fetch bead', kind: 'upstream', details: { message: msg } });
+    }
+  });
+
   router.post('/:id/claim', async (req, res) => {
     await runBeadAction(req.params.id, 'claim', undefined, res);
   });

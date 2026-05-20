@@ -1,5 +1,6 @@
 import type {
   GcSessionList,
+  GcBead,
   GcBeadList,
   GcMailList,
   GcEventList,
@@ -151,6 +152,10 @@ export class GcClient {
 
   async listSessions(signal?: AbortSignal): Promise<GcSessionList> {
     return this.getJson<GcSessionList>(this.cityPath('/sessions'), signal);
+  }
+
+  async getBead(id: string, signal?: AbortSignal): Promise<GcBead> {
+    return this.getJson<GcBead>(this.cityPath(`/bead/${encodeURIComponent(id)}`), signal);
   }
 
   async listBeads(

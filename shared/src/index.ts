@@ -183,6 +183,9 @@ export interface GcBead {
   dependent_count?: number;
   comment_count?: number;
   metadata?: Record<string, unknown>;
+  /** Supervisor-supplied reference handle. On formula templates this is
+   *  the formula name (e.g. "mol-focus-review"). Absent on most beads. */
+  ref?: string;
 }
 
 export interface GcBeadList {

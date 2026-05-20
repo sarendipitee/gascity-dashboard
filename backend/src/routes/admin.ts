@@ -28,6 +28,15 @@ const ENG_TYPES = new Set(['feature', 'bug', 'task', 'docs']);
 function isEngBead(bead: GcBead): boolean {
   if (!ENG_TYPES.has(bead.issue_type)) return false;
   if (bead.labels?.some((l) => l.startsWith('gc:'))) return false;
+  // Formula templates (metadata['gc.kind']==='workflow') are plumbing,
+  // not actionable work. They stay in_progress for the life of the
+  // formula and would otherwise pollute the 'stalled' column forever.
+  // Closing them would orphan every future dispatch.
+  const md = bead.metadata;
+  if (md && typeof md === 'object') {
+    const kind = (md as Record<string, unknown>)['gc.kind'];
+    if (kind === 'workflow') return false;
+  }
   return true;
 }
 
