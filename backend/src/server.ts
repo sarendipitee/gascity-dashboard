@@ -21,6 +21,7 @@ import { buildsRouter } from './routes/builds.js';
 import { healthRouter } from './routes/health.js';
 import { doltRouter, startDoltNomsSampler } from './routes/dolt.js';
 import { adminRouter } from './routes/admin.js';
+import { eventsRouter } from './routes/events.js';
 import { setAuditLogPath } from './audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -42,10 +43,10 @@ function main(): void {
   // ── Security middleware (V0-SHIP-REQUIRED) ────────────────────────────
   app.use(hostHeaderAllowlistFactory(config.extraAllowedHosts));
   app.use(originCheck(config.port, config.extraAllowedHosts));
-  // CSP connect-src extension: Phase C wires EventSource direct to gc
-  // supervisor for /events/stream. Different port = different origin under
-  // same-origin policy, so the supervisor URL must be explicitly enumerated.
-  app.use(securityHeaders([config.gcSupervisorUrl]));
+  // gascity-dashboard-iew: EventSource now flows through /api/events/stream
+  // (same origin) instead of directly to the gc supervisor. connect-src
+  // 'self' covers it, so no extra origins needed.
+  app.use(securityHeaders());
   app.use(csrfIssueCookie);
 
   // ── Health check (no CSRF, no privileged access) ──────────────────────
@@ -83,16 +84,13 @@ function main(): void {
 
   app.use('/api', writeRouter);
 
-  // Frontend needs to know the gc supervisor URL to open EventSource
-  // direct (architect addendum td-wisp-ijk7g). The CSP already allows
-  // it; this endpoint is the one place that surfaces it to the browser
-  // so the URL isn't hardcoded in two places.
-  app.get('/api/config/gc-supervisor', (_req, res) => {
-    res.json({
-      supervisor_url: config.gcSupervisorUrl,
-      city: config.cityName,
-    });
-  });
+  // SSE proxy (gascity-dashboard-iew). Mounted outside writeRouter so it
+  // bypasses csrfValidate — EventSource can't send custom headers, and
+  // it's a GET so the origin-check middleware already exempts it.
+  app.use('/api/events', eventsRouter({
+    supervisorUrl: config.gcSupervisorUrl,
+    cityName: config.cityName,
+  }));
 
   // Start the dolt-noms 10-min sampler. The actual metric source is
   // pending mechanic surgical-ask; the sampler is wired so the ring

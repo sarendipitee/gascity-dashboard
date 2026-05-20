@@ -1,41 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 
-// Direct EventSource against gc supervisor's /v0/city/{name}/events/stream.
-// Architect addendum td-wisp-ijk7g + mechanic td-wisp-e1v14: gc supervisor
-// serves real SSE on this path and its CORS is permissive (echoes Origin,
-// allows all verbs, supports Last-Event-ID). No backend cursor-poll
-// wrapper needed.
-//
-// CSP connect-src already includes the supervisor URL (see security
-// middleware). The browser opens the stream directly.
+// gascity-dashboard-iew: EventSource against the backend's same-origin
+// SSE proxy at /api/events/stream. The backend pipes the gc supervisor's
+// /v0/city/{name}/events/stream verbatim. Same-origin SSE means CSP
+// 'self' covers it and deployment only needs one port reachable from
+// the browser.
 
 export type GcEventConnState = 'connecting' | 'open' | 'closed';
-
-interface GcEventConfig {
-  /** URL is fetched once from /api/config/gc-supervisor; cached after. */
-  supervisorUrl: string;
-  city: string;
-}
-
-let cachedConfig: GcEventConfig | null = null;
-let configPromise: Promise<GcEventConfig> | null = null;
-
-async function loadConfig(): Promise<GcEventConfig> {
-  if (cachedConfig) return cachedConfig;
-  if (!configPromise) {
-    configPromise = fetch('/api/config/gc-supervisor', { credentials: 'same-origin' })
-      .then((r) => r.json())
-      .then((j) => {
-        const cfg: GcEventConfig = {
-          supervisorUrl: String(j.supervisor_url),
-          city: String(j.city),
-        };
-        cachedConfig = cfg;
-        return cfg;
-      });
-  }
-  return configPromise;
-}
 
 /**
  * Subscribe to gc events. When an event whose type starts with any of
@@ -56,74 +27,57 @@ export function useGcEventRefresh(
     let es: EventSource | null = null;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastEventId: string | null = null;
     let retryDelayMs = 1_000;
 
-    const connect = async () => {
-      try {
-        const cfg = await loadConfig();
+    const connect = () => {
+      // Same-origin path; the browser will send Last-Event-ID automatically
+      // on reconnect, and the backend proxy forwards it to upstream.
+      es = new EventSource('/api/events/stream');
+      setState('connecting');
+      es.onopen = () => {
         if (cancelled) return;
-        // The supervisor's stream path lives under /v0/city/{name}/events/stream.
-        const u = new URL(
-          `${cfg.supervisorUrl}/v0/city/${encodeURIComponent(cfg.city)}/events/stream`,
-        );
-        if (lastEventId) u.searchParams.set('after', lastEventId);
-        es = new EventSource(u, { withCredentials: false });
-        setState('connecting');
-        es.onopen = () => {
-          if (cancelled) return;
-          setState('open');
-          retryDelayMs = 1_000;
-        };
-        // gc supervisor sends events with `event: event` (the event NAME
-        // is literally "event"), not the default "message". EventSource
-        // routes named events to addEventListener('<name>', ...) — only
-        // unnamed events reach .onmessage. Without the explicit listener
-        // below, the connection opens, the indicator reads 'live', and
-        // refreshes never fire. Both handlers point to the same dispatch
-        // so the path is identical regardless of how the server names them.
-        const handleData = (msg: MessageEvent<string>) => {
-          if (cancelled) return;
-          if (msg.lastEventId) lastEventId = msg.lastEventId;
-          let parsed: { type?: string } | null = null;
-          try {
-            parsed = JSON.parse(msg.data) as { type?: string };
-          } catch {
-            return;
+        setState('open');
+        retryDelayMs = 1_000;
+      };
+      // gc supervisor sends events with `event: event` (the event NAME
+      // is literally "event"), not the default "message". EventSource
+      // routes named events to addEventListener('<name>', ...) — only
+      // unnamed events reach .onmessage. Both handlers point to the same
+      // dispatch so the path is identical regardless of how the server
+      // names them.
+      const handleData = (msg: MessageEvent<string>) => {
+        if (cancelled) return;
+        let parsed: { type?: string } | null = null;
+        try {
+          parsed = JSON.parse(msg.data) as { type?: string };
+        } catch {
+          return;
+        }
+        const t = parsed?.type;
+        if (typeof t !== 'string') return;
+        for (const prefix of prefixes) {
+          if (t.startsWith(prefix)) {
+            onMatchRef.current();
+            break;
           }
-          const t = parsed?.type;
-          if (typeof t !== 'string') return;
-          for (const prefix of prefixes) {
-            if (t.startsWith(prefix)) {
-              onMatchRef.current();
-              break;
-            }
-          }
-        };
-        es.onmessage = handleData;
-        es.addEventListener('event', handleData as EventListener);
-        es.onerror = () => {
-          if (cancelled) return;
-          setState('closed');
-          es?.close();
-          es = null;
-          // Exponential backoff capped at 30s.
-          retryTimer = setTimeout(() => {
-            retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
-            void connect();
-          }, retryDelayMs);
-        };
-      } catch {
+        }
+      };
+      es.onmessage = handleData;
+      es.addEventListener('event', handleData as EventListener);
+      es.onerror = () => {
         if (cancelled) return;
         setState('closed');
+        es?.close();
+        es = null;
+        // Exponential backoff capped at 30s.
         retryTimer = setTimeout(() => {
           retryDelayMs = Math.min(retryDelayMs * 2, 30_000);
-          void connect();
+          connect();
         }, retryDelayMs);
-      }
+      };
     };
 
-    void connect();
+    connect();
 
     return () => {
       cancelled = true;

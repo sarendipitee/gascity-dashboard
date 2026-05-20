@@ -69,10 +69,9 @@ export function originCheck(port: number, extraAllowedHosts: ReadonlyArray<strin
 }
 
 export function securityHeaders(extraConnectSrc: ReadonlyArray<string> = []) {
-  // Phase C addendum td-wisp-ijk7g: the browser opens an EventSource
-  // directly against gc supervisor at a different origin (different port).
-  // CSP connect-src must enumerate the supervisor URL explicitly — 'self'
-  // would not cover http://127.0.0.1:8372. Pass the gc base URL in here.
+  // SSE flows same-origin via /api/events/stream (gascity-dashboard-iew),
+  // so 'self' covers EventSource. extraConnectSrc is kept for any future
+  // cross-origin needs.
   const connectSrc = ["'self'", ...extraConnectSrc].join(' ');
   const csp = [
     "default-src 'self'",
