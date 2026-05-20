@@ -9,11 +9,35 @@ import { GroupedTable } from '../components/GroupedTable';
 import { ListSearchBar } from '../components/ListSearchBar';
 import { Modal } from '../components/Modal';
 import { PageHeader } from '../components/PageHeader';
+import { SortToggle } from '../components/SortToggle';
 import { StatusBadge, type StatusTone } from '../components/StatusBadge';
 import { type TableColumn } from '../components/Table';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
-import { useListFilters, type FilterChip } from '../hooks/useListFilters';
-import { sessionProject } from '../hooks/projectOf';
+import { useListFilters, type FilterChip, type SortMode } from '../hooks/useListFilters';
+import {
+  ORCHESTRATION_PROJECT,
+  isPerRigDispatcher,
+  sessionProject,
+} from '../hooks/projectOf';
+
+const PINNED_PROJECTS = [ORCHESTRATION_PROJECT];
+const NON_COLLAPSIBLE_PROJECTS = new Set([ORCHESTRATION_PROJECT]);
+
+// Activity = the most recent timestamp on the session, used both for
+// the rig-group sort and as the column sort value. Returns undefined
+// when neither field is parseable so the hook can sink such rigs to
+// the bottom in activity-sort mode rather than ranking them at epoch 0.
+function sessionActivity(s: GcSession): number | undefined {
+  const raw = s.last_active ?? s.created_at;
+  if (!raw) return undefined;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : undefined;
+}
+
+const SORT_OPTIONS: ReadonlyArray<{ id: SortMode; label: string }> = [
+  { id: 'activity', label: 'activity' },
+  { id: 'alpha', label: 'alphabetical' },
+];
 
 // Session state chips collapse the gc supervisor's many states into
 // buckets the operator actually filters by. Every named GcSessionState
@@ -127,6 +151,11 @@ export function AgentsPage() {
     projectOf: sessionProject,
     searchOf: SESSION_SEARCH_FIELDS,
     chips: SESSION_CHIPS,
+    defaultCollapsed: true,
+    activityOf: sessionActivity,
+    defaultSortMode: 'activity',
+    pinnedProjects: PINNED_PROJECTS,
+    nonCollapsibleProjects: NON_COLLAPSIBLE_PROJECTS,
   });
 
   const columns = useMemo<ReadonlyArray<TableColumn<GcSession>>>(() => [
@@ -135,16 +164,29 @@ export function AgentsPage() {
       label: 'Agent',
       sortable: true,
       sortValue: (r) => r.alias ?? r.title ?? r.id,
-      render: (r) => (
-        <div className="min-w-0">
-          <div className="text-fg font-medium truncate">
-            {r.alias ?? r.title ?? r.id}
+      render: (r) => {
+        // Per-rig dispatchers (alias '<rig>/control-dispatcher') live
+        // inside their rig group but perform an orchestration role.
+        // Italicize the alias so the operator can spot them at a glance
+        // without lifting them out of their rig (cross-rig
+        // orchestration is handled separately by the Orchestration
+        // pinned group).
+        const dispatcher = isPerRigDispatcher(r);
+        return (
+          <div className="min-w-0">
+            <div
+              className={`text-fg truncate ${
+                dispatcher ? 'font-normal italic' : 'font-medium'
+              }`}
+            >
+              {r.alias ?? r.title ?? r.id}
+            </div>
+            <div className="text-label uppercase tracking-wider text-fg-faint mt-1 truncate">
+              {r.template ?? r.provider ?? ''}
+            </div>
           </div>
-          <div className="text-label uppercase tracking-wider text-fg-faint mt-1 truncate">
-            {r.template ?? r.provider ?? ''}
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'state',
@@ -264,12 +306,20 @@ export function AgentsPage() {
           totalCount={rows.length}
           ariaLabel="Search agents"
         />
-        <FilterChips
-          chips={SESSION_CHIPS}
-          activeIds={filters.activeChipIds}
-          onToggle={filters.toggleChip}
-          legend="State"
-        />
+        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
+          <FilterChips
+            chips={SESSION_CHIPS}
+            activeIds={filters.activeChipIds}
+            onToggle={filters.toggleChip}
+            legend="State"
+          />
+          <SortToggle<SortMode>
+            value={filters.sortMode}
+            options={SORT_OPTIONS}
+            onChange={filters.setSortMode}
+            legend="Sort"
+          />
+        </div>
       </div>
 
       <GroupedTable

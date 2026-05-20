@@ -2,12 +2,18 @@
 // collapse. The chevron is a glyph (▸ collapsed, ▾ expanded), not a
 // box. The count badge is plain tabular figures in fg-faint, not a
 // pill. Whitespace + type carries the hierarchy (Flat Page Rule).
+//
+// Non-collapsible variant renders as a small-caps label (no chevron,
+// no count). Used for the Orchestration pseudo-group that pins cross-
+// rig sessions at the top — there's nothing to collapse, and it isn't
+// a rig.
 
 interface ProjectGroupHeaderProps {
   project: string;
   count: number;
   collapsed: boolean;
   onToggle: () => void;
+  collapsible?: boolean;
 }
 
 export function ProjectGroupHeader({
@@ -15,7 +21,21 @@ export function ProjectGroupHeader({
   count,
   collapsed,
   onToggle,
+  collapsible = true,
 }: ProjectGroupHeaderProps) {
+  if (!collapsible) {
+    return (
+      <div
+        role="heading"
+        aria-level={2}
+        className="flex items-baseline gap-2 py-1 text-label uppercase tracking-wider text-fg-faint"
+      >
+        <span aria-hidden>·</span>
+        <span>{project}</span>
+        <span aria-hidden>·</span>
+      </div>
+    );
+  }
   return (
     <button
       type="button"

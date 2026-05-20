@@ -5,8 +5,20 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 //
 // Search and chip state are NOT persisted — they reset between
 // sessions because the operator is filtering for "right now". Only
-// collapsed-group ids persist, because the operator's mental model
-// of which projects she's currently ignoring is stable across visits.
+// collapsed-group ids and the sort mode persist, because those map
+// onto a stable mental model of which projects she's ignoring and
+// how she likes to scan them.
+//
+// Persistence semantics depend on `defaultCollapsed`:
+//   - false (default): the persisted Set holds projects the operator
+//     has *explicitly collapsed*. Projects she hasn't touched are
+//     expanded.
+//   - true: the persisted Set holds projects the operator has
+//     *explicitly expanded*. Projects she hasn't touched are
+//     collapsed. Used by views where the rig/project list is long
+//     enough that everything-expanded is noise.
+// Both modes use distinct storage keys so flipping the default for
+// a view never silently inverts pre-existing operator state.
 
 export interface FilterChip<T> {
   /** Stable id used for active-set membership and persistence. */
@@ -18,22 +30,46 @@ export interface FilterChip<T> {
 }
 
 export interface ProjectGroup<T> {
+  /** Display label for the group header. */
   project: string;
+  /** Stable identity used for collapse state and pinning. */
+  projectKey: string;
   rows: ReadonlyArray<T>;
   /** Count of rows in the project AFTER filters but BEFORE collapse. */
   totalInProject: number;
   collapsed: boolean;
+  /** When false, the group renders without a chevron and never collapses. */
+  collapsible: boolean;
 }
+
+export type SortMode = 'alpha' | 'activity';
+
+/** projectOf return shape. A bare string keeps the simple case where
+ *  display label and bucket key are identical (Beads, Mail). The
+ *  richer object lets callers normalize for grouping while keeping a
+ *  human-readable display label (Agents needs this to fold
+ *  case/separator drift in rig paths without losing GEO/etc.). */
+export type ProjectBucketResult = string | { key: string; label: string };
 
 interface UseListFiltersOptions<T> {
   /** Stable per-view key, e.g. 'beads' | 'agents' | 'mail'. */
   viewKey: string;
   rows: ReadonlyArray<T>;
   /** Derive the project bucket for a row. */
-  projectOf: (row: T) => string;
+  projectOf: (row: T) => ProjectBucketResult;
   /** Strings to consider for substring search. */
   searchOf: (row: T) => ReadonlyArray<string | undefined | null>;
   chips: ReadonlyArray<FilterChip<T>>;
+  /** When true, groups start collapsed and the persisted Set is "user-expanded". */
+  defaultCollapsed?: boolean;
+  /** Activity timestamp (epoch ms) for a row. Required for sortMode='activity'. */
+  activityOf?: (row: T) => number | undefined;
+  /** Sort mode the view boots into when nothing is persisted. */
+  defaultSortMode?: SortMode;
+  /** Project keys that always sort first (in the given order), regardless of sortMode. */
+  pinnedProjects?: ReadonlyArray<string>;
+  /** Project keys that cannot be collapsed (header has no chevron, rows always shown). */
+  nonCollapsibleProjects?: ReadonlySet<string>;
 }
 
 interface UseListFiltersResult<T> {
@@ -43,17 +79,25 @@ interface UseListFiltersResult<T> {
   toggleChip: (id: string) => void;
   isCollapsed: (project: string) => boolean;
   toggleProject: (project: string) => void;
-  /** All visible projects (after filters), sorted alphabetically. Empty when no rows match. */
+  sortMode: SortMode;
+  setSortMode: (m: SortMode) => void;
+  /** Visible projects after filters, ordered per sortMode. */
   groups: ReadonlyArray<ProjectGroup<T>>;
   /** Total matching rows across all projects (BEFORE collapse). */
   totalMatches: number;
 }
 
-const STORAGE_PREFIX = 'gcd:listFilters:collapsed:';
+const COLLAPSED_KEY_PREFIX = 'gcd:listFilters:collapsed:';
+const EXPANDED_KEY_PREFIX = 'gcd:listFilters:expanded:';
+const SORT_KEY_PREFIX = 'gcd:listFilters:sortMode:';
 
-function loadCollapsed(viewKey: string): Set<string> {
+function storageKey(viewKey: string, defaultCollapsed: boolean): string {
+  return (defaultCollapsed ? EXPANDED_KEY_PREFIX : COLLAPSED_KEY_PREFIX) + viewKey;
+}
+
+function loadOverrides(viewKey: string, defaultCollapsed: boolean): Set<string> {
   try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + viewKey);
+    const raw = window.localStorage.getItem(storageKey(viewKey, defaultCollapsed));
     if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
@@ -65,10 +109,14 @@ function loadCollapsed(viewKey: string): Set<string> {
   return new Set();
 }
 
-function saveCollapsed(viewKey: string, ids: ReadonlySet<string>): void {
+function saveOverrides(
+  viewKey: string,
+  defaultCollapsed: boolean,
+  ids: ReadonlySet<string>,
+): void {
   try {
     window.localStorage.setItem(
-      STORAGE_PREFIX + viewKey,
+      storageKey(viewKey, defaultCollapsed),
       JSON.stringify(Array.from(ids)),
     );
   } catch {
@@ -76,30 +124,62 @@ function saveCollapsed(viewKey: string, ids: ReadonlySet<string>): void {
   }
 }
 
+function loadSortMode(viewKey: string, fallback: SortMode): SortMode {
+  try {
+    const raw = window.localStorage.getItem(SORT_KEY_PREFIX + viewKey);
+    if (raw === 'alpha' || raw === 'activity') return raw;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+function saveSortMode(viewKey: string, mode: SortMode): void {
+  try {
+    window.localStorage.setItem(SORT_KEY_PREFIX + viewKey, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+const EMPTY_PINNED: ReadonlyArray<string> = [];
+const EMPTY_NONCOLLAPSIBLE: ReadonlySet<string> = new Set();
+
 export function useListFilters<T>({
   viewKey,
   rows,
   projectOf,
   searchOf,
   chips,
+  defaultCollapsed = false,
+  activityOf,
+  defaultSortMode = 'alpha',
+  pinnedProjects = EMPTY_PINNED,
+  nonCollapsibleProjects = EMPTY_NONCOLLAPSIBLE,
 }: UseListFiltersOptions<T>): UseListFiltersResult<T> {
   const [search, setSearch] = useState('');
   const [activeChipIds, setActiveChipIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() =>
-    loadCollapsed(viewKey),
+  // The Set is "user overrides": projects whose current collapse state
+  // differs from defaultCollapsed. isCollapsed(p) = defaultCollapsed XOR overrides.has(p).
+  const [overrides, setOverrides] = useState<ReadonlySet<string>>(() =>
+    loadOverrides(viewKey, defaultCollapsed),
+  );
+  const [sortMode, setSortModeState] = useState<SortMode>(() =>
+    loadSortMode(viewKey, defaultSortMode),
   );
 
   // When the view key changes (e.g. Mail switching inbox <-> sent),
-  // reload persisted collapse AND reset ephemeral search/chip state.
+  // reload persisted state AND reset ephemeral search/chip state.
   // Without the reset, an "unread" chip activated in inbox would
   // silently filter Sent (all read), making the box appear empty.
   useEffect(() => {
-    setCollapsed(loadCollapsed(viewKey));
+    setOverrides(loadOverrides(viewKey, defaultCollapsed));
+    setSortModeState(loadSortMode(viewKey, defaultSortMode));
     setSearch('');
     setActiveChipIds(new Set());
-  }, [viewKey]);
+  }, [viewKey, defaultCollapsed, defaultSortMode]);
 
   const toggleChip = useCallback((id: string) => {
     setActiveChipIds((cur) => {
@@ -112,20 +192,29 @@ export function useListFilters<T>({
 
   const toggleProject = useCallback(
     (project: string) => {
-      setCollapsed((cur) => {
+      setOverrides((cur) => {
         const next = new Set(cur);
         if (next.has(project)) next.delete(project);
         else next.add(project);
-        saveCollapsed(viewKey, next);
+        saveOverrides(viewKey, defaultCollapsed, next);
         return next;
       });
     },
-    [viewKey],
+    [viewKey, defaultCollapsed],
   );
 
   const isCollapsed = useCallback(
-    (project: string) => collapsed.has(project),
-    [collapsed],
+    (project: string) =>
+      overrides.has(project) ? !defaultCollapsed : defaultCollapsed,
+    [overrides, defaultCollapsed],
+  );
+
+  const setSortMode = useCallback(
+    (m: SortMode) => {
+      setSortModeState(m);
+      saveSortMode(viewKey, m);
+    },
+    [viewKey],
   );
 
   const groups = useMemo<ReadonlyArray<ProjectGroup<T>>>(() => {
@@ -150,27 +239,116 @@ export function useListFilters<T>({
       return false;
     };
 
-    const buckets = new Map<string, T[]>();
+    interface BucketState {
+      rows: T[];
+      labelCounts: Map<string, number>;
+    }
+    const buckets = new Map<string, BucketState>();
     for (const row of rows) {
       if (!matchesSearch(row)) continue;
       if (!matchesChips(row)) continue;
-      const proj = projectOf(row);
-      const bucket = buckets.get(proj);
-      if (bucket) bucket.push(row);
-      else buckets.set(proj, [row]);
+      const result = projectOf(row);
+      const key = typeof result === 'string' ? result : result.key;
+      const label = typeof result === 'string' ? result : result.label;
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.rows.push(row);
+        bucket.labelCounts.set(label, (bucket.labelCounts.get(label) ?? 0) + 1);
+      } else {
+        buckets.set(key, {
+          rows: [row],
+          labelCounts: new Map([[label, 1]]),
+        });
+      }
     }
 
-    const projects = Array.from(buckets.keys()).sort();
-    return projects.map((project) => {
-      const projRows = buckets.get(project) ?? [];
+    // Pick a display label per bucket: highest-frequency wins; ties
+    // prefer a label that contains uppercase letters so acronyms like
+    // GEO survive against the lowercased basename `geo`.
+    const pickLabel = (counts: Map<string, number>): string => {
+      let best = '';
+      let bestCount = -1;
+      let bestHasUpper = false;
+      for (const [label, count] of counts) {
+        const hasUpper = /[A-Z]/.test(label);
+        const wins =
+          count > bestCount ||
+          (count === bestCount && hasUpper && !bestHasUpper);
+        if (wins) {
+          best = label;
+          bestCount = count;
+          bestHasUpper = hasUpper;
+        }
+      }
+      return best;
+    };
+
+    const allKeys = Array.from(buckets.keys());
+    // Pinned keys come first (in the order they were declared), even
+    // if they're not in the result set. Pinned keys with no rows are
+    // dropped — we don't render empty groups.
+    const pinnedPresent = pinnedProjects.filter((k) => buckets.has(k));
+    const pinnedSet = new Set(pinnedPresent);
+    const unpinnedKeys = allKeys.filter((k) => !pinnedSet.has(k));
+
+    if (sortMode === 'activity' && activityOf) {
+      // Score each unpinned project by its most recent row activity.
+      // Projects with no scoreable rows sink to the bottom in
+      // alphabetical order so the result is deterministic.
+      const score = new Map<string, number>();
+      for (const key of unpinnedKeys) {
+        const b = buckets.get(key);
+        let best = -Infinity;
+        if (b) {
+          for (const row of b.rows) {
+            const t = activityOf(row);
+            if (typeof t === 'number' && Number.isFinite(t) && t > best) best = t;
+          }
+        }
+        score.set(key, best);
+      }
+      unpinnedKeys.sort((a, b) => {
+        const sa = score.get(a) ?? -Infinity;
+        const sb = score.get(b) ?? -Infinity;
+        if (sa !== sb) return sb - sa;
+        return a.localeCompare(b);
+      });
+    } else {
+      unpinnedKeys.sort();
+    }
+
+    const orderedKeys = [...pinnedPresent, ...unpinnedKeys];
+    const collapsedFor = (key: string) => {
+      if (nonCollapsibleProjects.has(key)) return false;
+      return overrides.has(key) ? !defaultCollapsed : defaultCollapsed;
+    };
+
+    return orderedKeys.map((key) => {
+      const b = buckets.get(key);
+      const projRows = b?.rows ?? [];
       return {
-        project,
+        project: b ? pickLabel(b.labelCounts) : key,
+        projectKey: key,
         rows: projRows,
         totalInProject: projRows.length,
-        collapsed: collapsed.has(project),
+        collapsed: collapsedFor(key),
+        collapsible: !nonCollapsibleProjects.has(key),
       };
     });
-  }, [rows, search, activeChipIds, chips, projectOf, searchOf, collapsed]);
+  }, [
+    rows,
+    search,
+    activeChipIds,
+    chips,
+    projectOf,
+    searchOf,
+    overrides,
+    defaultCollapsed,
+    sortMode,
+    activityOf,
+    pinnedProjects,
+    nonCollapsibleProjects,
+  ]);
 
   const totalMatches = useMemo(
     () => groups.reduce((sum, g) => sum + g.totalInProject, 0),
@@ -184,6 +362,8 @@ export function useListFilters<T>({
     toggleChip,
     isCollapsed,
     toggleProject,
+    sortMode,
+    setSortMode,
     groups,
     totalMatches,
   };

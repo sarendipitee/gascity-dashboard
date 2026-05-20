@@ -40,12 +40,13 @@ export function GroupedTable<T>({
   return (
     <div className="space-y-8">
       {groups.map((group) => (
-        <section key={group.project}>
+        <section key={group.projectKey}>
           <ProjectGroupHeader
             project={group.project}
             count={group.totalInProject}
             collapsed={group.collapsed}
-            onToggle={() => onToggleProject(group.project)}
+            onToggle={() => onToggleProject(group.projectKey)}
+            collapsible={group.collapsible}
           />
           {!group.collapsed && (
             <Table
