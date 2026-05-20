@@ -61,19 +61,15 @@ export class GcClient {
   }
 
   /**
-   * True if `err` is a fetch / abort that originated from a timeout
-   * (either the per-request default or a caller-supplied AbortSignal).
-   * Lets route handlers map upstream-timeout -> HTTP 504 cleanly.
+   * True if `err` originated from the per-request timeout. Caller-supplied
+   * AbortSignals fire as AbortError and are NOT timeouts — they map to
+   * client-disconnect handling, not 504.
    */
   static isTimeoutError(err: unknown): boolean {
     if (!(err instanceof Error)) return false;
-    if (err.name === 'AbortError' || err.name === 'TimeoutError') return true;
-    // Node fetch wraps the underlying TypeError; the cause carries the real signal.
+    if (err.name === 'TimeoutError') return true;
     const cause = (err as { cause?: unknown }).cause;
-    if (cause instanceof Error) {
-      return cause.name === 'AbortError' || cause.name === 'TimeoutError';
-    }
-    return false;
+    return cause instanceof Error && cause.name === 'TimeoutError';
   }
 
   private cityPath(suffix: string): string {

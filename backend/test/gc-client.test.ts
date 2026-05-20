@@ -110,7 +110,10 @@ describe('GcClient timeout', () => {
       err = e;
     }
     assert.ok(err, 'expected a rejection');
-    assert.equal(GcClient.isTimeoutError(err), true);
+    // Caller aborts are AbortError, not TimeoutError; isTimeoutError must
+    // distinguish so routes can map only true timeouts to HTTP 504.
+    assert.equal((err as Error).name, 'AbortError');
+    assert.equal(GcClient.isTimeoutError(err), false);
   });
 
   test('passes through normal responses', async () => {
