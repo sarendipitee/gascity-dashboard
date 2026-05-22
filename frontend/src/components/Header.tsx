@@ -9,6 +9,7 @@ const ROUTES: { to: string; label: string }[] = [
   { to: '/mail', label: 'Mail' },
   { to: '/activity', label: 'Activity' },
   { to: '/health', label: 'Health' },
+  { to: '/maintainer', label: 'Triage' },
 ];
 
 // The header is page furniture, not chrome. A small wordmark, the

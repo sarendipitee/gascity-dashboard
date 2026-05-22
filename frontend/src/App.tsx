@@ -7,6 +7,7 @@ import { MailPage } from './routes/Mail';
 import { ActivityPage } from './routes/Activity';
 import { HealthPage } from './routes/Health';
 import { KanbanPage } from './routes/Kanban';
+import { MaintainerPage } from './routes/Maintainer';
 import { ViewingAsProvider } from './contexts/ViewingAsContext';
 
 export function App() {
@@ -22,6 +23,7 @@ export function App() {
           <Route path="/mail" element={<MailPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/health" element={<HealthPage />} />
+          <Route path="/maintainer" element={<MaintainerPage />} />
         </Routes>
       </Layout>
     </ViewingAsProvider>

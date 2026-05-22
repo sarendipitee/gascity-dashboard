@@ -421,6 +421,109 @@ export interface ApiError {
   details?: Record<string, string>;
 }
 
+// ── Maintainer triage view (gascity-dashboard-hq2 + downstream) ─────
+//
+// Read-only triage surface for the maintainer of gastownhall/gascity.
+// Aggregates GitHub issues + PRs into a tiered, cluster-organised page.
+// Live status overlays a nightly-computed enrichment snapshot.
+
+export type TriageTier =
+  | 'regression_breaking'
+  | 'regression'
+  | 'stability';
+
+export type TriageKind = 'issue' | 'pr';
+
+export type ContributorTier =
+  | 'core'
+  | 'trusted'
+  | 'regular'
+  | 'new'
+  | 'spam_risk';
+
+export type TriageItemStatus =
+  | 'open'
+  | 'draft'
+  | 'needs_review'
+  | 'approved'
+  | 'changes_requested'
+  | 'merged'
+  | 'closed';
+
+export interface ContributorStat {
+  login: string;
+  tier: ContributorTier;
+  /** Issues opened by this contributor that became accepted bugs / PRs. Null until computed. */
+  issues_accepted: number | null;
+  issues_opened: number | null;
+  /** PRs opened that were merged. Null until computed. */
+  prs_merged: number | null;
+  prs_opened: number | null;
+  computed_at: IsoTimestamp | null;
+}
+
+export interface TriageWeakTie {
+  /** Human-readable topic / file group name. */
+  label: string;
+  /** Item count in this weak-tie cluster. */
+  count: number;
+}
+
+export interface TriageItem {
+  kind: TriageKind;
+  number: number;
+  title: string;
+  status: TriageItemStatus;
+  author: ContributorStat;
+  created_at: IsoTimestamp;
+  updated_at: IsoTimestamp;
+  /** Tier classification. Null when not yet computed by the priority classifier. */
+  tier: TriageTier | null;
+  /** Primary file-overlap cluster id; items sharing this id sit together. Null when uncomputed. */
+  cluster_id: string | null;
+  /** Files this item touches / is predicted to touch. Empty array when uncomputed. */
+  blast_files: string[];
+  /** Lines of diff for PRs; null for issues. */
+  lines_changed: number | null;
+  /** Cross-cluster topical ties; empty array until semantic enrichment runs. */
+  weak_ties: TriageWeakTie[];
+  /** For PRs: parent issue numbers if linked via Fixes/Closes. For issues: PR numbers that fix them. */
+  linked_numbers: number[];
+  html_url: string;
+  /** True when bug + breaking + actively shipping. Drives the maroon mark (One Mark Rule). */
+  is_marked: boolean;
+}
+
+export interface TriageCluster {
+  cluster_id: string;
+  /** Sorted file list that defines this cluster. */
+  files: string[];
+  items: TriageItem[];
+  /** Sum of lines_changed across PRs in this cluster (issues contribute 0). */
+  lines_pending: number;
+}
+
+export interface TriageTierSection {
+  tier: TriageTier;
+  /** Clusters within the tier, sorted by item count desc. */
+  clusters: TriageCluster[];
+  /** Items in the tier that don't share files with anyone else. */
+  unclustered: TriageItem[];
+}
+
+export interface MaintainerTriage {
+  /** ISO of when the enrichment snapshot was computed. Status data may be fresher. */
+  computed_at: IsoTimestamp | null;
+  /** Repo this triage is for (gastownhall/gascity for v1). */
+  repo: string;
+  /** Top-level tiers in fixed order: regression_breaking, regression, stability. */
+  tiers: TriageTierSection[];
+  totals: {
+    issues_open: number;
+    prs_open: number;
+  };
+}
+
 /** Audit row written to .gc/events.jsonl on every privileged action. */
 export interface AdminAuditEvent {
   type: 'dashboard.exec' | 'dashboard.fetch' | 'dashboard.send_mail' | string;
