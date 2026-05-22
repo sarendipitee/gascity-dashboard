@@ -12,6 +12,7 @@ import type {
   DoltNomsTrend,
   KanbanResponse,
   MaintainerTriage,
+  ContributorStat,
   ApiError,
 } from 'gas-city-dashboard-shared';
 
@@ -170,5 +171,8 @@ export const api = {
   },
   maintainerRefresh(): Promise<MaintainerTriage> {
     return request('POST', '/api/maintainer/refresh', {});
+  },
+  maintainerContributor(login: string): Promise<ContributorStat> {
+    return request('GET', `/api/maintainer/contributor/${encodeURIComponent(login)}`);
   },
 };

@@ -8,6 +8,7 @@ import type {
 } from 'gas-city-dashboard-shared';
 import { execGhIssueList, execGhPrList, ExecError } from '../exec.js';
 import { classifyItem } from './classifier.js';
+import { computeContributorStats } from './contributor.js';
 
 // Compose a MaintainerTriage envelope from raw `gh` output.
 //
@@ -63,9 +64,15 @@ interface GhPr {
 }
 
 export async function fetchTriage(repo: string): Promise<MaintainerTriage> {
-  const [issuesRaw, prsRaw] = await Promise.all([
+  // Four parallel gh calls: two for the open lists (361 ingest), two for
+  // the full lifetime history that drives contributor stats (alh). The
+  // contributor fetches are by far the biggest payloads but they're
+  // bounded by the repo's total history, not the number of unique
+  // authors — much cheaper than per-login round-trips would be.
+  const [issuesRaw, prsRaw, contributorStats] = await Promise.all([
     execGhIssueList(repo, ITEM_FETCH_LIMIT),
     execGhPrList(repo, ITEM_FETCH_LIMIT),
+    computeContributorStats(repo),
   ]);
 
   if (issuesRaw.truncated) {
@@ -98,6 +105,14 @@ export async function fetchTriage(repo: string): Promise<MaintainerTriage> {
 
   const issueItems = issues.map(mapIssue);
   const prItems = prs.map(mapPr);
+
+  // Splice the computed ContributorStat onto each item's author. Authors
+  // we couldn't find stats for (deleted accounts, ghosts) keep the
+  // defaultContributor fallback.
+  for (const item of [...issueItems, ...prItems]) {
+    const stat = contributorStats.get(item.author.login);
+    if (stat !== undefined) item.author = stat;
+  }
 
   // Reverse map: every issue gets the PR numbers that fix it (derived
   // from each PR's already-populated linked_numbers, which mapPr filled

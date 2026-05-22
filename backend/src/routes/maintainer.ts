@@ -1,9 +1,11 @@
 import { Router } from 'express';
-import type { MaintainerTriage } from 'gas-city-dashboard-shared';
+import type { ContributorStat, MaintainerTriage } from 'gas-city-dashboard-shared';
 import { recordAudit } from '../audit.js';
 import { ExecError } from '../exec.js';
 import { fetchTriage } from '../maintainer/triage.js';
 import { readCache, writeCache } from '../maintainer/storage.js';
+
+const GH_LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/;
 
 // /api/maintainer routes — read the cached triage envelope or refresh it
 // from `gh`. The refresh is on-demand for dev; the nightly worker (bead
@@ -84,7 +86,44 @@ export function maintainerRouter({ repo, cachePath }: MaintainerRouterOptions): 
     }
   });
 
+  router.get('/contributor/:login', async (req, res) => {
+    const login = req.params.login;
+    if (!GH_LOGIN_RE.test(login)) {
+      res.status(400).json({ error: 'invalid login', kind: 'validation' });
+      return;
+    }
+    const cached = await readCache(cachePath);
+    if (cached === null) {
+      res.status(404).json({ error: 'no triage cache yet', kind: 'not_found' });
+      return;
+    }
+    // The same ContributorStat is sliced onto every item the author owns
+    // in the envelope, so any item carrying this login has the answer.
+    // Avoids a second source of truth.
+    const stat = findContributor(cached, login);
+    if (stat === null) {
+      res.status(404).json({ error: 'contributor not in current envelope', kind: 'not_found' });
+      return;
+    }
+    void recordAudit({
+      type: 'dashboard.fetch',
+      endpoint: 'GET /api/maintainer/contributor/:login',
+      parsed_args: { login },
+      duration_ms: 0,
+    });
+    res.json(stat);
+  });
+
   return router;
+}
+
+function findContributor(envelope: MaintainerTriage, login: string): ContributorStat | null {
+  for (const tier of envelope.tiers) {
+    for (const item of [...tier.unclustered, ...tier.clusters.flatMap((c) => c.items)]) {
+      if (item.author.login === login) return item.author;
+    }
+  }
+  return null;
 }
 
 function countItems(envelope: MaintainerTriage): number {

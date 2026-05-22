@@ -485,6 +485,86 @@ export async function execGhIssueList(
 }
 
 /**
+ * `gh issue list --repo <repo> --state all --json number,author,state,stateReason
+ *  --limit <n>` — pulls the full lifetime issue history (open + closed,
+ *  any reason) so the contributor-stats module can tally per-author
+ *  totals without per-login round-trips. Returned shape is intentionally
+ *  thin: no titles, no bodies, no labels — only what's needed to count.
+ */
+export async function execGhIssueListAll(
+  repo: string,
+  limit: number,
+): Promise<ExecResult> {
+  if (!GH_REPO_RE.test(repo)) {
+    throw new ExecError('invalid repo (expected owner/name)', 'validation');
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
+    throw new ExecError('invalid limit (1..10000)', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec(
+      'gh',
+      [
+        'issue',
+        'list',
+        '--repo',
+        repo,
+        '--state',
+        'all',
+        '--json',
+        'number,author,state',
+        '--limit',
+        String(limit),
+      ],
+      60_000,
+      MAX_BYTES_LARGE,
+    );
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
+ * `gh pr list --repo <repo> --state all --json number,author,state --limit <n>`
+ *  — same idea as execGhIssueListAll but for PRs. state values include
+ *  OPEN / CLOSED / MERGED.
+ */
+export async function execGhPrListAll(
+  repo: string,
+  limit: number,
+): Promise<ExecResult> {
+  if (!GH_REPO_RE.test(repo)) {
+    throw new ExecError('invalid repo (expected owner/name)', 'validation');
+  }
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10000) {
+    throw new ExecError('invalid limit (1..10000)', 'validation');
+  }
+  await acquireSlot();
+  try {
+    return await runExec(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--repo',
+        repo,
+        '--state',
+        'all',
+        '--json',
+        'number,author,state',
+        '--limit',
+        String(limit),
+      ],
+      60_000,
+      MAX_BYTES_LARGE,
+    );
+  } finally {
+    releaseSlot();
+  }
+}
+
+/**
  * `gh pr list --repo <repo> --state open --json <fields> --limit <n>`
  */
 export async function execGhPrList(
