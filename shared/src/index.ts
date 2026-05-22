@@ -477,8 +477,16 @@ export interface TriageItem {
   author: ContributorStat;
   created_at: IsoTimestamp;
   updated_at: IsoTimestamp;
+  /** GitHub labels on the item. Source of truth for priority classification
+   *  and area-based clustering. Empty array when gh returns no labels. */
+  labels: string[];
   /** Tier classification. Null when not yet computed by the priority classifier. */
   tier: TriageTier | null;
+  /** Combined triage score: severity (tier weight) + simplicity-of-fix bonus.
+   *  Used to sort items within a tier so the top of each section is "highest
+   *  priority by triage skill" — biggest severity AND most-shippable. Higher
+   *  is better. Null until 7ts (priority classifier) populates it. */
+  triage_score: number | null;
   /** Primary file-overlap cluster id; items sharing this id sit together. Null when uncomputed. */
   cluster_id: string | null;
   /** Files this item touches / is predicted to touch. Empty array when uncomputed. */

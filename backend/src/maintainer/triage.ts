@@ -3,9 +3,11 @@ import type {
   MaintainerTriage,
   TriageItem,
   TriageItemStatus,
+  TriageTier,
   TriageTierSection,
 } from 'gas-city-dashboard-shared';
 import { execGhIssueList, execGhPrList, ExecError } from '../exec.js';
+import { classifyItem } from './classifier.js';
 
 // Compose a MaintainerTriage envelope from raw `gh` output.
 //
@@ -143,7 +145,9 @@ function mapIssue(it: GhIssue): TriageItem {
     author: defaultContributor(it.author?.login ?? 'unknown'),
     created_at: it.createdAt,
     updated_at: it.updatedAt,
+    labels: extractLabels(it.labels),
     tier: null,
+    triage_score: null,
     cluster_id: null,
     blast_files: [],
     lines_changed: null,
@@ -185,7 +189,9 @@ function mapPr(pr: GhPr): TriageItem {
     author: defaultContributor(pr.author?.login ?? 'unknown'),
     created_at: pr.createdAt,
     updated_at: pr.updatedAt,
+    labels: extractLabels(pr.labels),
     tier: null,
+    triage_score: null,
     cluster_id: null,
     blast_files: [],
     lines_changed: adds + dels,
@@ -194,6 +200,13 @@ function mapPr(pr: GhPr): TriageItem {
     html_url: pr.url,
     is_marked: false,
   };
+}
+
+function extractLabels(labels: GhLabel[] | undefined): string[] {
+  if (!labels) return [];
+  return labels
+    .map((l) => l.name)
+    .filter((n): n is string => typeof n === 'string' && n.length > 0);
 }
 
 function derivePrStatus(pr: GhPr): TriageItemStatus {
@@ -221,18 +234,75 @@ function composeEnvelope(repo: string, items: TriageItem[]): MaintainerTriage {
   const issuesOpen = items.filter((i) => i.kind === 'issue').length;
   const prsOpen = items.filter((i) => i.kind === 'pr').length;
 
-  // Until the priority classifier (bead 7ts) lands, every item drops
-  // into stability.unclustered as the safe-default tier. The empty
-  // REGRESSION + BREAKING and REGRESSION tier headings stay present so
-  // the page shape is stable across enrichment iterations.
+  // Apply the priority classifier (gascity-dashboard-7ts) in place:
+  // every item gets its tier, triage_score, and a provisional is_marked.
+  for (const item of items) {
+    const { tier, is_marked, triage_score } = classifyItem(item);
+    item.tier = tier;
+    item.is_marked = is_marked;
+    item.triage_score = triage_score;
+  }
+
+  // One Mark Rule enforcement: at most ONE maroon ● on the entire page.
+  // Find the single highest-scoring mark candidate; clear the rest.
+  let topMark: TriageItem | null = null;
+  for (const item of items) {
+    if (!item.is_marked) continue;
+    if (
+      topMark === null ||
+      (item.triage_score ?? 0) > (topMark.triage_score ?? 0)
+    ) {
+      topMark = item;
+    }
+  }
+  for (const item of items) {
+    if (item.is_marked && item !== topMark) item.is_marked = false;
+  }
+
+  // Hand the mark up to the parent issue when the winner is a PR that
+  // has a parent issue in this envelope. The pair reads as one unit —
+  // the issue is the "what's wrong," the nested PR underneath is the
+  // "here's the fix" — and the eye should land on the problem first.
+  // PrRow renders nested PRs with the ↳ continuation glyph and would
+  // suppress the mark anyway; transferring it surfaces the One Mark
+  // visibly instead of hiding it on an indented row.
+  if (topMark !== null && topMark.kind === 'pr' && topMark.linked_numbers.length > 0) {
+    for (const linkedNum of topMark.linked_numbers) {
+      const parent = items.find(
+        (i) => i.kind === 'issue' && i.number === linkedNum,
+      );
+      if (parent !== undefined) {
+        topMark.is_marked = false;
+        parent.is_marked = true;
+        break;
+      }
+    }
+  }
+
+  const byTier = new Map<TriageTier, TriageItem[]>([
+    ['regression_breaking', []],
+    ['regression', []],
+    ['stability', []],
+  ]);
+  for (const item of items) {
+    if (item.tier === null) continue;
+    byTier.get(item.tier)?.push(item);
+  }
+  for (const list of byTier.values()) {
+    list.sort((a, b) => (b.triage_score ?? 0) - (a.triage_score ?? 0));
+  }
+
   const tiers: TriageTierSection[] = [
-    { tier: 'regression_breaking', clusters: [], unclustered: [] },
-    { tier: 'regression', clusters: [], unclustered: [] },
-    { tier: 'stability', clusters: [], unclustered: items },
+    { tier: 'regression_breaking', clusters: [], unclustered: byTier.get('regression_breaking') ?? [] },
+    { tier: 'regression', clusters: [], unclustered: byTier.get('regression') ?? [] },
+    { tier: 'stability', clusters: [], unclustered: byTier.get('stability') ?? [] },
   ];
 
+  // computed_at marks the snapshot moment. Set once a classifier (or
+  // any future enrichment pass) has run. Until enrichment beads gtr,
+  // alh, 98h all land, this just means tiers + scores are populated.
   return {
-    computed_at: null,
+    computed_at: new Date().toISOString(),
     repo,
     tiers,
     totals: { issues_open: issuesOpen, prs_open: prsOpen },
