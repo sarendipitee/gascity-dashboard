@@ -90,7 +90,6 @@ function main(): void {
       repo: config.maintainerRepo,
       cachePath: config.maintainerCachePath,
       slingTarget: config.maintainerSlingTarget,
-      triagedStatePath: config.maintainerTriagedStatePath,
     }),
   );
 
