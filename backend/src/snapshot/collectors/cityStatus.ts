@@ -220,7 +220,10 @@ export function quotedTomlValue(line: string, key: string): string | null {
   if (!valuePart.startsWith('"')) return null;
 
   const closingQuote = valuePart.lastIndexOf('"');
-  if (closingQuote <= 0) return null;
+  // closingQuote === 0 → only the opening quote, no closing one.
+  // closingQuote === 1 → `""` empty value — pin contract: return null rather
+  // than '', so the exported API and parseCityToml's truthy check agree.
+  if (closingQuote <= 1) return null;
 
   // The caller already trims the line, so trailing must be empty.
   if (valuePart.slice(closingQuote + 1).trim() !== '') return null;

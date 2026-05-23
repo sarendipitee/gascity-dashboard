@@ -184,6 +184,14 @@ describe('quotedTomlValue (gascity-dashboard-ddz)', () => {
     assert.equal(quotedTomlValue('name =', 'name'), null);
     assert.equal(quotedTomlValue('# comment', 'name'), null);
   });
+
+  test('returns null for empty quoted value (pinned contract)', () => {
+    // `name = ""` is syntactically valid TOML but semantically useless for
+    // rig name/path. Contract pinned in wave-p3p4-clean Phase 4: return
+    // null so the exported API matches parseCityToml's truthy guard.
+    assert.equal(quotedTomlValue('name = ""', 'name'), null);
+    assert.equal(quotedTomlValue('path = ""', 'path'), null);
+  });
 });
 
 describe('parseCityToml (regression for ddz)', () => {

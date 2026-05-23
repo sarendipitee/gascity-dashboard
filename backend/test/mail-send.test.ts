@@ -109,9 +109,10 @@ async function readAudit(p: string): Promise<Array<Record<string, unknown>>> {
 }
 
 describe('POST /api/mail-send', { concurrency: false }, () => {
-  let h: AppHandle;
+  let h: AppHandle | undefined;
   afterEach(async () => {
     if (h !== undefined) await h.close();
+    h = undefined;
   });
 
   test('happy path: send dispatches via DI stub and audits without leaking body', async () => {

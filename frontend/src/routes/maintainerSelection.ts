@@ -125,6 +125,13 @@ const MAX_CONCURRENT_SLINGS = 8;
  * decide whether to clear the selection or leave the failed subset
  * selected for retry.
  *
+ * Note: this is a chunk loop, not a sliding window — the next chunk does
+ * not start until ALL items in the current chunk settle, so a single slow
+ * sling drops throughput to 1 in-flight until it resolves. For the bulk-
+ * triage use case (small N, single-operator localhost) this is fine; a
+ * sliding-window primitive (p-limit) would be the upgrade if N grows or
+ * one backend slot starts dominating tail latency.
+ *
  * The send fn is injected so vitest can stub without mocking the global
  * fetch — same DI shape as backend execGcSling.
  */

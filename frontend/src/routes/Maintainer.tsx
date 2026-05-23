@@ -334,11 +334,22 @@ export function SelectionActionBar({
     >
       <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-baseline justify-between gap-6">
         <div className="flex items-baseline gap-3 text-body text-fg-muted">
-          <span className="tnum text-fg">{count}</span>
-          <span>selected</span>
+          {/*
+            Suppress "0 selected" when only the success line is visible
+            (count == 0 happens right after a fully successful dispatch
+            when the selection set is cleared but the success banner is
+            still up). Reads as a quiet acknowledgement instead of a
+            confusing "0 selected · Slung N ...".
+          */}
+          {count > 0 && (
+            <>
+              <span className="tnum text-fg">{count}</span>
+              <span>selected</span>
+            </>
+          )}
           {error !== null && (
             <>
-              <span aria-hidden>·</span>
+              {count > 0 && <span aria-hidden>·</span>}
               <span className="text-accent" role="alert">
                 {error}
               </span>
@@ -346,7 +357,7 @@ export function SelectionActionBar({
           )}
           {success !== null && (
             <>
-              <span aria-hidden>·</span>
+              {(count > 0 || error !== null) && <span aria-hidden>·</span>}
               {/*
                 Success copy stays in the neutral text-fg register, not
                 the maroon accent: the One Mark Rule reserves accent for

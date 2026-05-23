@@ -114,4 +114,13 @@ describe('SelectionActionBar — selection counter', () => {
     expect(screen.getByRole('button', { name: /send to triage agent/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^clear$/i })).toBeTruthy();
   });
+
+  it('suppresses "0 selected" when count=0 and a success line is showing', () => {
+    // After a fully successful dispatch the selection is cleared but the
+    // success banner stays up until TTL. Don't surface a confusing
+    // "0 selected · Slung 3 to triage agent" — the success line stands alone.
+    renderBar({ count: 0, success: { count: 3, target: 'triage agent' } });
+    expect(screen.queryByText(/selected/i)).toBeNull();
+    expect(screen.getByRole('status')).toBeTruthy();
+  });
 });
