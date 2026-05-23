@@ -8,6 +8,7 @@ import type {
   GitHubSummary,
   ResourceSummary,
   SourceName,
+  SourceState,
   SourceStatus,
   TokenUsageSummary,
   WorkflowSummary,
@@ -192,12 +193,20 @@ function buildDefaultCaches(options: CreateSnapshotServiceOptions): SourceCacheM
  * tokens — dkb Q2 pending). Load throws so the snapshot envelope carries
  * status='error' for those sources. Tests cover the deferred shape in
  * snapshot-route.test.ts via the same constructor pattern.
+ *
+ * Opts out of the default-on sanitizer (gascity-dashboard-4r5) via
+ * `sanitizeErrorMessage: null`: the thrown message is a hand-authored
+ * string with no OS-path or secret material, and preserving the literal
+ * "${source} collector not wired (gascity-dashboard-37u, dkb Q2
+ * pending)" gives the operator a bead-id breadcrumb in the wire error
+ * instead of a generic "${source} collection failed".
  */
 function notWiredCache<T>(source: SourceName, now: (() => Date) | undefined): SourceCache<T> {
   return new SourceCache<T>({
     source,
     ttlMs: 30_000,
     now,
+    sanitizeErrorMessage: null,
     load: () => {
       throw new Error(`${source} collector not wired (gascity-dashboard-37u, dkb Q2 pending)`);
     },
@@ -219,13 +228,45 @@ async function readSources(
     return cache.get();
   };
 
+  // settle wraps pick() so a rejection from any single cache becomes a
+  // wire-shape SourceState envelope with status='error' instead of
+  // propagating. This is the snapshot route's failure-isolation
+  // guarantee, owned at the composition layer rather than SourceCache's
+  // internal try/catch. If a future collector wrapper escapes the
+  // cache's catch (sync throw before refreshUnshared's try, returned
+  // rejected promise, etc.), the dashboard still serves a partial
+  // envelope — never 500s the whole route. Regression-guarded by
+  // backend/test/snapshot-failure-isolation.test.ts (gascity-dashboard-9tv).
+  //
+  // The caught error is routed through cache.sanitize() before landing
+  // on the wire: the very scenario this wrapper protects against (an
+  // escape from refreshUnshared's internal catch) is also the scenario
+  // where SourceCache.sanitize never ran. Without delegating here, the
+  // settle wrapper would silently leak the raw error.message — defeating
+  // the default-on sanitization contract added in gascity-dashboard-4r5.
+  const settle = async <T>(
+    name: SourceName,
+    cache: SourceCache<T>,
+  ): Promise<SourceState<T>> => {
+    try {
+      return await pick(name, cache);
+    } catch (error) {
+      return {
+        ...cache.snapshot(),
+        status: 'error',
+        error: cache.sanitize(error),
+        data: null,
+      };
+    }
+  };
+
   const [aimux, city, resources, workflows, github, tokens] = await Promise.all([
-    pick('aimux', caches.aimux),
-    pick('city', caches.city),
-    pick('resources', caches.resources),
-    pick('workflows', caches.workflows),
-    pick('github', caches.github),
-    pick('tokens', caches.tokens),
+    settle('aimux', caches.aimux),
+    settle('city', caches.city),
+    settle('resources', caches.resources),
+    settle('workflows', caches.workflows),
+    settle('github', caches.github),
+    settle('tokens', caches.tokens),
   ]);
 
   return { aimux, city, resources, workflows, github, tokens };
