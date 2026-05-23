@@ -35,3 +35,5 @@ credentials.*
 # Allow-list: the only hidden paths the project intentionally tracks.
 !.gitignore
 !.env.example
+!.github/
+!.github/**

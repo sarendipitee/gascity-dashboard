@@ -1,0 +1,86 @@
+# Quality gates run on every PR against main and every push to main.
+#
+# Scope is intentionally narrow for v1:
+#   - typecheck across all three workspaces (shared, backend, frontend)
+#   - typecheck of test files too (catches type drift the runtime tests miss)
+#   - backend tests (node --test via tsx loader)
+#   - frontend tests (vitest in jsdom)
+#
+# Not yet in CI (file a separate bead if you want to change this):
+#   - scripts/snap.mjs (Playwright visual snaps — too heavy, no golden source)
+#   - lint (no ESLint config in the repo yet)
+#   - npm audit / dependency scans
+#
+# The job is single + sequential. Split into a matrix later if the wall-clock
+# time becomes a problem; for the current size (~160 backend tests +
+# ~140 frontend tests) it runs comfortably under two minutes.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Newer PR pushes supersede older runs on the same PR head — saves minutes
+# on iterative PR pushes. Pushes to main are NOT cancelled: github.ref for
+# a push to main is always refs/heads/main, so back-to-back main commits
+# share the same concurrency group; without the conditional below they
+# would cancel each other and erase the green signal on a passing commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Read-only token. CI doesn't push commits, doesn't comment on PRs, doesn't
+# touch releases. Anything that needs more goes in a separate workflow with
+# explicitly scoped permissions.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: typecheck + tests (node 20)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # '20.x' rolls minor/patch updates within Node 20 — the engines
+          # field requires '>=20.0.0'. Pin to '20.18.0' (or use .nvmrc
+          # with node-version-file) if reproducibility matters more than
+          # security patches.
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      # backend and frontend both type-import from gas-city-dashboard-shared,
+      # which only resolves to its dist/ output. Build it first so the
+      # subsequent typecheck steps see real symbols, not unresolved modules.
+      - name: Build shared
+        run: npm run build:shared
+
+      - name: Typecheck (src)
+        run: npm run typecheck
+
+      - name: Typecheck (backend tests)
+        run: npm --workspace backend run typecheck:test
+
+      - name: Typecheck (frontend tests)
+        run: npm --workspace frontend run typecheck:test
+
+      # Vite's bundler resolution can fail where tsc passes (path aliases,
+      # asset imports, dynamic import boundaries). Run the real build so
+      # CI catches what typecheck alone misses. Backend's build is just
+      # `tsc`, so its typecheck step already covers that surface.
+      - name: Build frontend
+        run: npm --workspace frontend run build
+
+      - name: Backend tests
+        run: npm --workspace backend test
+
+      - name: Frontend tests
+        run: npm --workspace frontend test

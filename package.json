@@ -25,8 +25,8 @@
   "author": "Charlie Coutts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Wldc4rd/citadel.git"
+    "url": "https://github.com/sjarmak/gascity-dashboard.git"
   },
-  "homepage": "https://github.com/Wldc4rd/citadel",
-  "bugs": "https://github.com/Wldc4rd/citadel/issues"
+  "homepage": "https://github.com/sjarmak/gascity-dashboard",
+  "bugs": "https://github.com/sjarmak/gascity-dashboard/issues"
 }
