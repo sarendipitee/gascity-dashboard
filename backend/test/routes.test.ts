@@ -145,6 +145,102 @@ describe('routes: upstream timeout -> HTTP 504', () => {
     }
   });
 
+  // gascity-dashboard-sr6: the 502 response must not include raw err.message.
+  // Pre-existing leak: fetch-level failures (ECONNREFUSED, DNS errors) carry
+  // OS-level detail (interface names, file paths, ports) in their message,
+  // and forwarding that verbatim to the browser is a topology leak. The
+  // GcClient-classified `gc supervisor returned <status>` shape is the only
+  // safe shape; everything else must be redacted to a classification only.
+  test('GET /api/sessions 502 redacts raw err.message from response body', async () => {
+    // Point the GcClient at an unreachable port so fetch fails with an
+    // ECONNREFUSED-shaped error whose `.message` carries OS detail
+    // (interface names, ports, file paths depending on platform).
+    const gc = new GcClient({
+      baseUrl: 'http://127.0.0.1:1',
+      cityName: 'test',
+      defaultTimeoutMs: 100,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api/sessions', sessionsRouter(gc, { sessionsTimeoutMs: 500 }));
+    const { url, close } = await startApp(app);
+    try {
+      const res = await fetch(`${url}/api/sessions`);
+      assert.equal(res.status, 502);
+      const text = await res.text();
+      const body = JSON.parse(text) as {
+        kind?: string;
+        details?: Record<string, string>;
+      };
+      assert.equal(body.kind, 'upstream');
+      // The contract: details may carry a classification (err.name) but
+      // never the raw err.message. ECONNREFUSED messages typically include
+      // "ECONNREFUSED" plus host/port; assert none of those slip through.
+      assert.equal(
+        body.details?.message,
+        undefined,
+        'details.message must be redacted',
+      );
+      assert.ok(
+        !text.includes('ECONNREFUSED'),
+        `response leaks ECONNREFUSED: ${text}`,
+      );
+      assert.ok(
+        !text.includes('127.0.0.1:1'),
+        `response leaks upstream host:port: ${text}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
+  // Same redaction contract as the GET handler above. Peek uses the same
+  // GcClient.fetchOnce path, so the same OS-detail leak applies. Surfaced
+  // by the Phase 4 unified review on wave-p3p4-cleanup-review (security
+  // HIGH escalation; not part of the original sr6 scope but fixed in-wave
+  // because the bead description called for the broader sweep to be filed
+  // as a sibling — peek is the same-file twin and the fix is a one-liner).
+  test('POST /api/sessions/:id/peek 502 redacts raw err.message from response body', async () => {
+    const gc = new GcClient({
+      baseUrl: 'http://127.0.0.1:1',
+      cityName: 'test',
+      defaultTimeoutMs: 100,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api/sessions', sessionsRouter(gc, { sessionsTimeoutMs: 500 }));
+    const { url, close } = await startApp(app);
+    try {
+      const res = await fetch(`${url}/api/sessions/gc-peek/peek`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      assert.equal(res.status, 502);
+      const text = await res.text();
+      const body = JSON.parse(text) as {
+        kind?: string;
+        details?: Record<string, string>;
+      };
+      assert.equal(body.kind, 'upstream');
+      assert.equal(
+        body.details?.message,
+        undefined,
+        'details.message must be redacted',
+      );
+      assert.ok(
+        !text.includes('ECONNREFUSED'),
+        `response leaks ECONNREFUSED: ${text}`,
+      );
+      assert.ok(
+        !text.includes('127.0.0.1:1'),
+        `response leaks upstream host:port: ${text}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
   test('GET /api/mail returns 504 with upstream-timeout kind when supervisor hangs', async () => {
     fake.setHandler(() => {
       /* never respond */

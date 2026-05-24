@@ -104,9 +104,15 @@ export function sessionsRouter(
         });
         return;
       }
+      // gascity-dashboard-sr6: do NOT forward err.message to the browser.
+      // Fetch-level failures (ECONNREFUSED, DNS errors) embed OS detail
+      // (interface names, ports, file paths) that leaks topology even on a
+      // 127.0.0.1-only deployment. Surface the error's class name only;
+      // server-side log retains full fidelity for ops debugging.
+      console.warn(`[sessions] /api/sessions failed: ${(err as Error).message}`);
       res
         .status(502)
-        .json({ error: 'failed to list sessions', kind: 'upstream', details: { message: (err as Error).message } });
+        .json({ error: 'failed to list sessions', kind: 'upstream', details: { name: (err as Error).name ?? 'Error' } });
     }
   });
 
@@ -142,9 +148,14 @@ export function sessionsRouter(
         });
         return;
       }
+      // Same rationale as the list-sessions handler above: peek goes
+      // through the same fetch path, so the same topology-leak class
+      // (ECONNREFUSED / DNS) applies. Class name only to the browser;
+      // server-side log retains full fidelity for ops debugging.
+      console.warn(`[sessions] /api/sessions/:id/peek failed: ${(err as Error).message}`);
       res
         .status(502)
-        .json({ error: 'failed to fetch transcript', kind: 'upstream', details: { message: (err as Error).message } });
+        .json({ error: 'failed to fetch transcript', kind: 'upstream', details: { name: (err as Error).name ?? 'Error' } });
     }
   });
 
