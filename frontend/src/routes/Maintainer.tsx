@@ -798,17 +798,8 @@ function RowMeta({
       >
         #{item.number}
       </a>
-      {item.triage_score !== null && (
-        <>
-          <span aria-hidden>·</span>
-          <span
-            className="text-fg-faint"
-            title="triage score = severity_base + simplicity_bonus; higher = should land sooner"
-          >
-            t{item.triage_score}
-          </span>
-        </>
-      )}
+      <TriageScore item={item} />
+
       <span aria-hidden>·</span>
       <ContributorByline author={item.author} />
       <span aria-hidden>·</span>
@@ -821,6 +812,58 @@ function RowMeta({
       )}
     </div>
   );
+}
+
+// Triage score is the meter that says "how urgent is this item, on the
+// maintainer's scale". Two modes (gascity-dashboard-are):
+//
+//   - VETTED  → the triage agent has run its assessment, the score is its
+//               vetted_score. Render in normal text-fg weight, prefixed
+//               with a check glyph, no italic. The check is the only
+//               typographic affordance — no badge, no chip, no colored pill,
+//               so the Greyscale Test and the Flat Page Rule both hold.
+//
+//   - HEURISTIC → no triage_assessment yet; the heuristic triage_score
+//                 stands in. Render 't<n>' in fg-faint italic. The italic
+//                 + faint pairing reads as "provisional / not yet judged"
+//                 even without color.
+//
+// When triage_score itself is null (classifier hasn't run yet), render
+// nothing — the column is meaningfully absent rather than zero.
+export function TriageScore({ item }: { item: Pick<TriageItem, 'triage_score' | 'triage_assessment'> }) {
+  // Loose `!= null` is deliberate: an envelope cached by a build that pre-dates
+  // this field has `triage_assessment: undefined`, and strict `!== null` would
+  // pass-through into a property read on undefined. See triage-assessment.ts.
+  if (item.triage_assessment != null) {
+    const vettedLabel = `vetted by ${item.triage_assessment.source}: score ${item.triage_assessment.vetted_score}`;
+    return (
+      <>
+        <span aria-hidden>·</span>
+        <span
+          className="text-fg"
+          title={vettedLabel}
+          aria-label={vettedLabel}
+        >
+          <span aria-hidden className="mr-1">{'✓'}</span>
+          {item.triage_assessment.vetted_score}
+        </span>
+      </>
+    );
+  }
+  if (item.triage_score !== null) {
+    return (
+      <>
+        <span aria-hidden>·</span>
+        <span
+          className="text-fg-faint italic"
+          title="heuristic triage score = severity_base + simplicity_bonus; awaiting agent assessment"
+        >
+          t{item.triage_score}
+        </span>
+      </>
+    );
+  }
+  return null;
 }
 
 function PrStatus({ status }: { status: TriageItemStatus }) {

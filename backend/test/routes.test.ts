@@ -4,7 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import { GcClient } from '../src/gc-client.js';
-import { sessionsRouter } from '../src/routes/sessions.js';
+import { sessionsRouter, resolveSessionsTimeoutMs } from '../src/routes/sessions.js';
 import { beadsRouter } from '../src/routes/beads.js';
 import { mailRouter } from '../src/routes/mail.js';
 import { healthRouter, resolveHealthTimeoutMs } from '../src/routes/health.js';
@@ -384,6 +384,179 @@ describe('resolveHealthTimeoutMs', () => {
     } finally {
       if (savedEnv === undefined) delete process.env.GC_HEALTH_TIMEOUT_MS;
       else process.env.GC_HEALTH_TIMEOUT_MS = savedEnv;
+    }
+  });
+});
+
+describe('resolveSessionsTimeoutMs', () => {
+  const ORIGINAL = process.env.GC_SESSIONS_TIMEOUT_MS;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.GC_SESSIONS_TIMEOUT_MS;
+    else process.env.GC_SESSIONS_TIMEOUT_MS = ORIGINAL;
+  });
+
+  test('falls back to 3000ms when env var is unset', () => {
+    delete process.env.GC_SESSIONS_TIMEOUT_MS;
+    assert.equal(resolveSessionsTimeoutMs(), 3_000);
+  });
+
+  test('honors a positive integer env var', () => {
+    process.env.GC_SESSIONS_TIMEOUT_MS = '4500';
+    assert.equal(resolveSessionsTimeoutMs(), 4_500);
+  });
+
+  test('falls back when env var is non-numeric', () => {
+    process.env.GC_SESSIONS_TIMEOUT_MS = 'not-a-number';
+    assert.equal(resolveSessionsTimeoutMs(), 3_000);
+  });
+
+  test('falls back when env var is zero or negative (typo guard)', () => {
+    process.env.GC_SESSIONS_TIMEOUT_MS = '0';
+    assert.equal(resolveSessionsTimeoutMs(), 3_000);
+    process.env.GC_SESSIONS_TIMEOUT_MS = '-1';
+    assert.equal(resolveSessionsTimeoutMs(), 3_000);
+  });
+
+  test('clamps oversize values to 30000 (typo guard)', () => {
+    // A typo like '99999999999' would otherwise let /api/sessions hang
+    // for the full underlying GcClient window. Cap at 30s.
+    process.env.GC_SESSIONS_TIMEOUT_MS = '99999999999';
+    assert.equal(resolveSessionsTimeoutMs(), 30_000);
+  });
+});
+
+describe('sessionsRouter timeout bound', () => {
+  let fake: Fake;
+  beforeEach(async () => {
+    fake = await startFake();
+  });
+  afterEach(async () => {
+    await fake.close();
+  });
+
+  test('sessionsRouter route-level timeout fires before GcClient default when supervisor hangs', async () => {
+    // The bead (gascity-dashboard-xba) is about /api/sessions taking ~15s
+    // because the underlying GcClient timeout is generous (5s default, or
+    // larger via GC_CLIENT_TIMEOUT_MS). The sessions route bounds its own
+    // wait with a tighter window so the Mail agent panel never sits on a
+    // long supervisor stall.
+    fake.setHandler(() => {
+      /* never respond */
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      // Deliberately generous: the test proves the sessions route bails
+      // BEFORE this would fire.
+      defaultTimeoutMs: 5_000,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api/sessions', sessionsRouter(gc, { sessionsTimeoutMs: 150 }));
+    const { url, close } = await startApp(app);
+    try {
+      const start = Date.now();
+      const res = await fetch(`${url}/api/sessions`);
+      const elapsed = Date.now() - start;
+      assert.equal(res.status, 504);
+      assert.ok(
+        elapsed < 1_000,
+        `expected fast 504 from 150ms route timeout, got ${elapsed}ms (route may be waiting on GcClient instead)`,
+      );
+      const body = (await res.json()) as { kind?: string };
+      assert.equal(body.kind, 'upstream-timeout');
+    } finally {
+      await close();
+    }
+  });
+
+  test('sessionsRouter() captures GC_SESSIONS_TIMEOUT_MS at construction; runtime env mutation has no effect', async () => {
+    // Same contract as healthRouter: env is resolved once when the router
+    // is built. Operators restart the process to pick up a new value.
+    const savedEnv = process.env.GC_SESSIONS_TIMEOUT_MS;
+    process.env.GC_SESSIONS_TIMEOUT_MS = '120';
+    try {
+      fake.setHandler(() => {
+        /* never respond */
+      });
+      const gc = new GcClient({
+        baseUrl: fake.baseUrl,
+        cityName: 'test',
+        defaultTimeoutMs: 5_000,
+      });
+      const app = express();
+      app.use(express.json());
+      // No opts: forces resolveSessionsTimeoutMs() at construction time.
+      app.use('/api/sessions', sessionsRouter(gc));
+      // After construction: mutate env upward. A live-read implementation
+      // would now wait 5s; a startup-capture implementation stays at 120ms.
+      process.env.GC_SESSIONS_TIMEOUT_MS = '5000';
+      const { url, close } = await startApp(app);
+      try {
+        const start = Date.now();
+        const res = await fetch(`${url}/api/sessions`);
+        const elapsed = Date.now() - start;
+        assert.equal(res.status, 504);
+        assert.ok(
+          elapsed < 2_000,
+          `expected fast 504 from captured 120ms timeout, got ${elapsed}ms`,
+        );
+      } finally {
+        await close();
+      }
+    } finally {
+      if (savedEnv === undefined) delete process.env.GC_SESSIONS_TIMEOUT_MS;
+      else process.env.GC_SESSIONS_TIMEOUT_MS = savedEnv;
+    }
+  });
+
+  test('sessionsRouter still returns 200 with items on success when route timeout is set', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [{ id: 'gc-abc' }] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api/sessions', sessionsRouter(gc, { sessionsTimeoutMs: 150 }));
+    const { url, close } = await startApp(app);
+    try {
+      const res = await fetch(`${url}/api/sessions`);
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { items: { id: string }[] };
+      assert.equal(body.items.length, 1);
+      assert.equal(body.items[0]?.id, 'gc-abc');
+    } finally {
+      await close();
+    }
+  });
+
+  test('sessionsRouter still returns 502 for non-timeout upstream errors when route timeout is set', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 500;
+      res.end('boom');
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use('/api/sessions', sessionsRouter(gc, { sessionsTimeoutMs: 150 }));
+    const { url, close } = await startApp(app);
+    try {
+      const res = await fetch(`${url}/api/sessions`);
+      assert.equal(res.status, 502);
+      const body = (await res.json()) as { kind?: string };
+      assert.equal(body.kind, 'upstream');
+    } finally {
+      await close();
     }
   });
 });

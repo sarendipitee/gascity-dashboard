@@ -1,4 +1,5 @@
 import type { TriageCluster, TriageItem } from 'gas-city-dashboard-shared';
+import { sortScore } from './triage-assessment.js';
 
 // File-overlap clustering for the maintainer triage view
 // (gascity-dashboard-gtr).
@@ -82,7 +83,7 @@ export function buildClusters(items: TriageItem[]): {
       files: deriveClusterHeaderFiles(eligible),
       items: eligible
         .slice()
-        .sort((a, b) => (b.triage_score ?? 0) - (a.triage_score ?? 0)),
+        .sort((a, b) => sortScore(b) - sortScore(a)),
       lines_pending: eligible
         .filter((it) => it.kind === 'pr')
         .reduce((sum, it) => sum + (it.lines_changed ?? 0), 0),

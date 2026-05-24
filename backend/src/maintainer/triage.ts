@@ -11,6 +11,7 @@ import { classifyItem } from './classifier.js';
 import { computeContributorStats } from './contributor.js';
 import { buildClusters, inheritIssueFiles } from './blast-radius.js';
 import { buildTopicClusters } from './topics.js';
+import { parseTriageAssessment, sortScore } from './triage-assessment.js';
 
 // Compose a MaintainerTriage envelope from raw `gh` output.
 //
@@ -178,6 +179,7 @@ function mapIssue(it: GhIssue): TriageItem {
     labels: extractLabels(it.labels),
     tier: null,
     triage_score: null,
+    triage_assessment: null,
     cluster_id: null,
     blast_files: [],
     lines_changed: null,
@@ -222,6 +224,7 @@ function mapPr(pr: GhPr): TriageItem {
     labels: extractLabels(pr.labels),
     tier: null,
     triage_score: null,
+    triage_assessment: null,
     cluster_id: null,
     blast_files: extractFiles(pr.files),
     lines_changed: adds + dels,
@@ -273,22 +276,25 @@ function composeEnvelope(repo: string, items: TriageItem[]): MaintainerTriage {
 
   // Apply the priority classifier (gascity-dashboard-7ts) in place:
   // every item gets its tier, triage_score, and a provisional is_marked.
+  // Then overlay the agent-vetted triage_assessment (are) — when the
+  // triage skill agent has labeled an item with the full triage/* set,
+  // its vetted_score takes precedence over the heuristic for sort + render.
   for (const item of items) {
     const { tier, is_marked, triage_score } = classifyItem(item);
     item.tier = tier;
     item.is_marked = is_marked;
     item.triage_score = triage_score;
+    item.triage_assessment = parseTriageAssessment(item.labels);
   }
 
   // One Mark Rule enforcement: at most ONE maroon ● on the entire page.
-  // Find the single highest-scoring mark candidate; clear the rest.
+  // Find the single highest-scoring mark candidate; clear the rest. Uses
+  // sortScore so a vetted item wins the mark over an unvetted item with
+  // a higher heuristic score (vetted is the stronger signal).
   let topMark: TriageItem | null = null;
   for (const item of items) {
     if (!item.is_marked) continue;
-    if (
-      topMark === null ||
-      (item.triage_score ?? 0) > (topMark.triage_score ?? 0)
-    ) {
+    if (topMark === null || sortScore(item) > sortScore(topMark)) {
       topMark = item;
     }
   }
@@ -326,7 +332,7 @@ function composeEnvelope(repo: string, items: TriageItem[]): MaintainerTriage {
     byTier.get(item.tier)?.push(item);
   }
   for (const list of byTier.values()) {
-    list.sort((a, b) => (b.triage_score ?? 0) - (a.triage_score ?? 0));
+    list.sort((a, b) => sortScore(b) - sortScore(a));
   }
 
   // Two-pass clustering within each tier:

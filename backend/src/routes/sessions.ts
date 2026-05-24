@@ -12,12 +12,89 @@ const SESSION_ID_RE = /^(gc|td|th)-[a-z0-9]{1,16}$/;
 const PER_TURN_CAP = 16 * 1024;
 const TOTAL_CAP = 256 * 1024;
 
-export function sessionsRouter(gc: GcClient): Router {
+// gascity-dashboard-xba: bound /api/sessions wait time independently of the
+// global GcClient default. The Mail agent panel renders progressively from a
+// fast mail-derived list and footnotes "loading more agents" while sessions
+// is in flight; session-only aliases shouldn't keep that footnote up for 15s
+// when the supervisor stalls. 3s is tight enough that the panel turns over
+// quickly, long enough that a real-but-slow supervisor still answers.
+//
+// Operators override via GC_SESSIONS_TIMEOUT_MS (same shape as
+// GC_HEALTH_TIMEOUT_MS / GC_CLIENT_TIMEOUT_MS — narrower scope). Clamped at
+// MAX_SESSIONS_TIMEOUT_MS so a typo can't hold the route open for hours.
+const SESSIONS_TIMEOUT_MS = 3_000;
+const MAX_SESSIONS_TIMEOUT_MS = 30_000;
+
+/**
+ * Resolves the /api/sessions route timeout from GC_SESSIONS_TIMEOUT_MS,
+ * falling back to SESSIONS_TIMEOUT_MS. Invalid, zero, or negative values
+ * fall back too (matches resolveHealthTimeoutMs). Values above
+ * MAX_SESSIONS_TIMEOUT_MS are clamped.
+ *
+ * Read once at startup: sessionsRouter() calls this when the router is
+ * constructed and captures the result in a closure. Mutating
+ * GC_SESSIONS_TIMEOUT_MS at runtime has no effect — restart the dashboard.
+ */
+export function resolveSessionsTimeoutMs(): number {
+  const raw = process.env.GC_SESSIONS_TIMEOUT_MS;
+  if (typeof raw !== 'string') return SESSIONS_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return SESSIONS_TIMEOUT_MS;
+  return Math.min(n, MAX_SESSIONS_TIMEOUT_MS);
+}
+
+export interface SessionsRouterOptions {
+  /**
+   * Per-request timeout for GET /api/sessions. Defaults to
+   * GC_SESSIONS_TIMEOUT_MS env, then 3000ms. Captured at router
+   * construction; runtime env mutation has no effect.
+   */
+  sessionsTimeoutMs?: number;
+}
+
+/**
+ * Races a promise against a TimeoutError-named rejection so the route can
+ * surface a 504 (via GcClient.isTimeoutError) when the underlying GcClient
+ * call would otherwise sit on a generous default timeout. The underlying
+ * fetch is NOT cancelled (gc-client's awaitWithSignal would convert a
+ * caller-supplied AbortSignal into AbortError, which the 504 path doesn't
+ * recognise); it's left to settle on its own timer. Node releases the
+ * socket on completion, and single-flight coalescing means concurrent
+ * callers (e.g. the snapshot collector) still benefit from the same fetch.
+ */
+function raceWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err = new Error(`sessions route timed out after ${ms}ms`);
+      err.name = 'TimeoutError';
+      reject(err);
+    }, ms);
+    // Match the rest of the backend (worker.ts, dolt.ts, server.ts): an
+    // unref'd timer doesn't block graceful shutdown on SIGTERM.
+    timer.unref();
+    p.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+export function sessionsRouter(
+  gc: GcClient,
+  opts: SessionsRouterOptions = {},
+): Router {
   const router = Router();
+  const sessionsTimeoutMs = opts.sessionsTimeoutMs ?? resolveSessionsTimeoutMs();
 
   router.get('/', async (_req, res) => {
     try {
-      const { items } = await gc.listSessions();
+      const { items } = await raceWithTimeout(gc.listSessions(), sessionsTimeoutMs);
       res.json({ items });
     } catch (err) {
       if (GcClient.isTimeoutError(err)) {

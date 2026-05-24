@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { SelectionActionBar } from './Maintainer';
+import { SelectionActionBar, TriageScore } from './Maintainer';
 
 // gascity-dashboard-5ly: render-level assertions for the bulk action bar.
 // The success-state lifecycle (timer cleanup, back-to-back slings) is
@@ -107,6 +107,75 @@ describe('SelectionActionBar — error path regression', () => {
     });
     expect(screen.getByRole('alert')).toBeTruthy();
     expect(screen.getByRole('status')).toBeTruthy();
+  });
+});
+
+describe('TriageScore — vetted vs heuristic visual distinction', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('renders nothing when triage_score is null and no assessment', () => {
+    const { container } = render(
+      <TriageScore item={{ triage_score: null, triage_assessment: null }} />,
+    );
+    expect(container.textContent).toBe('');
+  });
+
+  it('renders heuristic score with t-prefix in faint italic when no assessment', () => {
+    const { container } = render(
+      <TriageScore item={{ triage_score: 215, triage_assessment: null }} />,
+    );
+    // 't215' — note the "t" prefix marks heuristic.
+    expect(container.textContent).toMatch(/t215/);
+    const span = container.querySelector('span.text-fg-faint.italic');
+    expect(span).not.toBeNull();
+    expect(span?.textContent).toBe('t215');
+  });
+
+  it('renders vetted score with check glyph in normal text-fg weight (no italic, no t-prefix)', () => {
+    const { container } = render(
+      <TriageScore
+        item={{
+          triage_score: 215,
+          triage_assessment: {
+            vetted_score: 280,
+            source: 'agent',
+            notes: '',
+            vetted_at: '2026-05-23T00:00:00.000Z',
+          },
+        }}
+      />,
+    );
+    // Score reads as the vetted_score (not the heuristic), no t-prefix.
+    expect(container.textContent).toMatch(/280/);
+    expect(container.textContent).not.toMatch(/t280/);
+    expect(container.textContent).not.toMatch(/t215/);
+    // Check glyph present.
+    expect(container.textContent).toMatch(/✓/);
+    // Container span is text-fg (normal weight), NOT text-fg-faint, NOT italic.
+    const fgSpan = container.querySelector('span.text-fg');
+    expect(fgSpan).not.toBeNull();
+    expect(container.querySelector('span.italic')).toBeNull();
+    expect(container.querySelector('span.text-fg-faint')).toBeNull();
+  });
+
+  it('vetted title attribute surfaces source + score for accessibility', () => {
+    const { container } = render(
+      <TriageScore
+        item={{
+          triage_score: 100,
+          triage_assessment: {
+            vetted_score: 340,
+            source: 'agent',
+            notes: '',
+            vetted_at: '2026-05-23T00:00:00.000Z',
+          },
+        }}
+      />,
+    );
+    const titled = container.querySelector('span[title]');
+    expect(titled?.getAttribute('title')).toMatch(/vetted by agent.*340/);
   });
 });
 

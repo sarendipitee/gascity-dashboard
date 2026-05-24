@@ -402,6 +402,31 @@ export type TriageItemStatus =
   | 'merged'
   | 'closed';
 
+/**
+ * Agent-vetted triage assessment that overrides the heuristic
+ * `triage_score` for sorting and rendering when present
+ * (gascity-dashboard-are).
+ *
+ * Set by the maintainer triage agent via a structured label convention
+ * on the GitHub item: `triage/vetted` marker, `triage/severity-<n>`
+ * (n in 0..4, lower=more severe), and `triage/simplicity-<low|medium|high>`.
+ * All three labels must be present for the parser to produce a vetted
+ * assessment; partial labels yield null so the heuristic still applies.
+ *
+ * `vetted_score` lives on the SAME numeric scale as `TriageItem.triage_score`
+ * so comparators sort correctly when a tier mixes vetted + unvetted items.
+ *
+ * `source` is `'agent'` for the only path that lands in this bead. The
+ * `'manual'` arm is reserved for a future maintainer ack path; no manual
+ * signal lands today.
+ */
+export interface TriageAssessment {
+  vetted_score: number;
+  source: 'agent' | 'manual';
+  notes: string;
+  vetted_at: IsoTimestamp;
+}
+
 export interface ContributorStat {
   login: string;
   tier: ContributorTier;
@@ -439,6 +464,12 @@ export interface TriageItem {
    *  priority by triage skill" — biggest severity AND most-shippable. Higher
    *  is better. Null until 7ts (priority classifier) populates it. */
   triage_score: number | null;
+  /** Agent-vetted assessment that overrides `triage_score` for sort + render
+   *  when present (gascity-dashboard-are). Null means the item has not been
+   *  vetted; the frontend then renders the heuristic `triage_score` in the
+   *  faint italic register. Populated by the label parser in
+   *  backend/src/maintainer/triage-assessment.ts. */
+  triage_assessment: TriageAssessment | null;
   /** Primary file-overlap cluster id; items sharing this id sit together. Null when uncomputed. */
   cluster_id: string | null;
   /** Files this item touches / is predicted to touch. Empty array when uncomputed. */

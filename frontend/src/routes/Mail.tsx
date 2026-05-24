@@ -44,8 +44,15 @@ const PROMPT_INJECTION_NOTICE =
 type MailBox = 'inbox' | 'sent';
 
 export function MailPage() {
-  const { viewingAs, setAlias, resetToOperator, aliasBuckets, aliasesLoading, loadAliases } =
-    useViewingAs();
+  const {
+    viewingAs,
+    setAlias,
+    resetToOperator,
+    aliasBuckets,
+    aliasesLoading,
+    sessionsUnavailable,
+    loadAliases,
+  } = useViewingAs();
   const [box, setBox] = useState<MailBox>('inbox');
 
   // Lazy alias prefetch — Mail is the only consumer of the dropdown, so
@@ -202,6 +209,7 @@ export function MailPage() {
         <AgentPanel
           buckets={aliasBuckets}
           loading={aliasesLoading}
+          sessionsUnavailable={sessionsUnavailable}
           value={viewingAs.alias}
           onChange={setAlias}
           onReset={resetToOperator}
@@ -286,6 +294,7 @@ export function MailPage() {
 function AgentPanel({
   buckets,
   loading,
+  sessionsUnavailable,
   value,
   onChange,
   onReset,
@@ -293,6 +302,7 @@ function AgentPanel({
 }: {
   buckets: ReadonlyArray<AliasBucket>;
   loading: boolean;
+  sessionsUnavailable: boolean;
   value: string;
   onChange: (v: string) => void;
   onReset: () => void;
@@ -444,6 +454,17 @@ function AgentPanel({
         {loading && filtered.length > 0 && (
           <p className="text-label uppercase tracking-wider text-fg-faint italic">
             Loading more agents
+          </p>
+        )}
+        {/* gascity-dashboard-xba: when /api/sessions returns 504 (route
+            timeout vs supervisor stall) the panel is still functional off
+            the mail-derived aliases. Surface the partial state explicitly
+            so the operator knows session-only agents (no mail activity)
+            won't appear, instead of leaving them to wonder if the list is
+            still loading. */}
+        {!loading && sessionsUnavailable && filtered.length > 0 && (
+          <p className="text-label uppercase tracking-wider text-fg-faint italic">
+            Agent list unavailable; showing mail-derived aliases only.
           </p>
         )}
       </div>

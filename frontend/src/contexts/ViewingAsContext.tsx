@@ -51,6 +51,15 @@ interface ViewingAsContextValue {
   /** True iff loadAliases() has been called and the fetch is in-flight. */
   aliasesLoading: boolean;
   /**
+   * True iff loadAliases() ran and the /api/sessions fetch failed (timeout
+   * or other upstream error). The mail-derived alias list is still
+   * populated; consumers use this flag to swap a generic "loading more"
+   * footnote for a terminal "agent list unavailable" message rather than
+   * stay ambiguous. Mail panel uses this for the gascity-dashboard-xba
+   * degraded-state copy.
+   */
+  sessionsUnavailable: boolean;
+  /**
    * Idempotently trigger the alias prefetch. First caller starts the
    * fetch; subsequent callers are no-ops. Routes that need the dropdown
    * (Mail) call this on mount; other routes never pay the cost.
@@ -87,6 +96,7 @@ export function ViewingAsProvider({ children }: { children: ReactNode }) {
   const [sessionAliases, setSessionAliases] = useState<string[]>([]);
   const [mailFromOrTo, setMailFromOrTo] = useState<string[]>([]);
   const [aliasesLoading, setAliasesLoading] = useState<boolean>(false);
+  const [sessionsUnavailable, setSessionsUnavailable] = useState<boolean>(false);
   // Single-flight guard: first loadAliases call wins; subsequent calls
   // (re-renders, StrictMode double-mount, multiple consumers) are no-ops.
   const startedRef = useRef<boolean>(false);
@@ -146,7 +156,11 @@ export function ViewingAsProvider({ children }: { children: ReactNode }) {
         setSessionAliases(out);
       })
       .catch(() => {
-        /* sessions unavailable — panel still works off mail-derived aliases */
+        // sessions unavailable — panel still works off mail-derived
+        // aliases, but flag it so the Mail agent panel can swap its
+        // "Loading more agents" footnote for a terminal "agent list
+        // unavailable" message (gascity-dashboard-xba).
+        if (mountedRef.current) setSessionsUnavailable(true);
       })
       .finally(settleOne);
 
@@ -210,9 +224,18 @@ export function ViewingAsProvider({ children }: { children: ReactNode }) {
       resetToOperator,
       aliasBuckets,
       aliasesLoading,
+      sessionsUnavailable,
       loadAliases,
     }),
-    [alias, setAlias, resetToOperator, aliasBuckets, aliasesLoading, loadAliases],
+    [
+      alias,
+      setAlias,
+      resetToOperator,
+      aliasBuckets,
+      aliasesLoading,
+      sessionsUnavailable,
+      loadAliases,
+    ],
   );
 
   // Strict: when the tab is hidden (parent walked away), revert to the

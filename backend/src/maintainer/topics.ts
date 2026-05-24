@@ -1,4 +1,5 @@
 import type { TriageCluster, TriageItem } from 'gas-city-dashboard-shared';
+import { sortScore } from './triage-assessment.js';
 
 // Topic-keyword clustering for items that don't share files
 // (gascity-dashboard-98h).
@@ -148,7 +149,7 @@ export function buildTopicClusters(items: TriageItem[]): {
       files: [`@topic/${topic}`],
       items: members
         .slice()
-        .sort((a, b) => (b.triage_score ?? 0) - (a.triage_score ?? 0)),
+        .sort((a, b) => sortScore(b) - sortScore(a)),
       lines_pending: members
         .filter((m) => m.kind === 'pr')
         .reduce((sum, m) => sum + (m.lines_changed ?? 0), 0),
