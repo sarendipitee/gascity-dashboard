@@ -262,7 +262,7 @@ Recommended behavior:
   - stdout/stderr summaries, capped
   - file edit summaries
   - final response or current streaming turn
-- The active node can auto-select on first load only if there is exactly one running node. Otherwise do not guess.
+- Do not auto-select active nodes on first load. Start with no selected node unless `?node=` explicitly names a valid node.
 
 ### Layout
 
@@ -305,12 +305,23 @@ First-pass graph.v2 shapes:
 | Container/children/epic/scope | Rounded grouping band or bracketed region | Contains child vertical run, muted when complete |
 | Conditional step | Split diamond or hexagon | Skipped state when condition false, pending when unresolved |
 | Runtime fanout/on_complete | Dashed rounded rectangle | Fanout badge with count when known |
-| Retry | Stacked capsule | Attempt badge such as `2/3` |
-| Check loop | Capsule with check notch | Run/check state and attempt badge |
+| Retry | Stacked capsule plus visible attempt/body nodes when present | Attempt badge such as `2/3`; executable attempt nodes remain selectable |
+| Check loop | Capsule with check notch plus visible loop body nodes | Run/check state and attempt badge; executable loop nodes remain selectable |
 | Expansion | Dashed outline group or small expansion badge | Shows generated nodes without pretending source step was directly run |
-| Scope-check | Badge attached to target node | Hidden from main graph unless selected through badge |
-| Workflow-finalize | Terminal capsule or badge on root | Complete/fail/skipped terminal state |
+| Scope-check | Badge attached to target node | Hidden from main graph for v1; may be exposed later through detail/debug affordances |
+| Workflow-finalize | Badge on root | Hidden from main graph for v1; may be exposed later through detail/debug affordances |
 | Spec/source node | Hidden by default | Available in debug/metadata only |
+
+Loop visibility rule:
+
+- Do not make loops opaque rollups. The user must be able to see and select executable nodes inside retry/check-loop bodies.
+- The left graph renders the current/latest iteration body nodes only.
+- Show prior iterations as a subtle stack/history cue on the loop region or control node, not as selectable left-graph nodes.
+- The current/latest iteration can show multiple selectable body nodes, and more than one of those nodes can have an active streaming session when the graph allows parallel work.
+- Selecting a body node opens Session panel iteration tabs for that logical node. Those right-panel tabs are how the user navigates prior iterations.
+- Previous iterations are historical. Their sessions are static transcript history and do not stream.
+- Control nodes may show aggregate status and attempt counts, but they do not replace the body nodes.
+- Compiler/housekeeping nodes such as `scope-check`, `workflow-finalize`, `cleanup`, and `spec` stay hidden or badged for v1 unless they are the only way to expose real operator work.
 
 Deferred graph.v2 shapes:
 
@@ -379,6 +390,12 @@ interface WorkflowSessionLink {
   sessionName: string;
   assignee: string;
   rigId?: string;
+  beadId?: string;
+  iteration?: number;
+  attempt?: number;
+  label?: string;
+  status?: WorkflowNodeStatus;
+  active?: boolean;
 }
 
 interface WorkflowDisplayNode {
@@ -389,10 +406,14 @@ interface WorkflowDisplayNode {
   status: WorkflowNodeStatus;
   currentBeadId?: string;
   scopeRef?: string;
+  loopControlNodeId?: string;
+  visibleIteration?: number;
+  iterationCount?: number;
+  hasHistoricalIterations?: boolean;
   attemptBadge?: string;
   attemptCount?: number;
   activeAttempt?: number;
-  sessionLink?: WorkflowSessionLink | null;
+  sessionLinks: WorkflowSessionLink[];
   controlBadges?: Array<{
     id: string;
     label: string;
@@ -453,10 +474,13 @@ GET /api/sessions/:id/stream
 - Server resolves the execution path. The browser never supplies a filesystem path.
 - The diff represents the current code working tree for that execution folder. It is expected to be mostly source files, tests, package/config files, and docs changed by the selected run.
 - It does not attempt to diff the formula definition, bead metadata, or workflow graph unless those files are actually changed in the execution folder.
-- Use `root_store_ref` and configured city/rig paths:
-  - `city:<name>` -> configured city root.
-  - `rig:<name>` -> matching rig path from supervisor city/rig config when available.
-  - unknown/missing path -> return skipped.
+- Resolve the path from supervisor-owned run data:
+  - Prefer the formula execution `cwd` when the workflow detail exposes it.
+  - Then use root/run metadata such as `gc.work_dir` or `work_dir`.
+  - Then use attached session metadata such as `work_dir`, if that is the only execution path the supervisor exposes.
+  - If execution cwd/work-dir metadata is missing, use the run's rig root.
+  - If neither execution path nor rig root is available, return `kind: "path_unknown"`.
+- Do not infer paths from browser query params, PR URLs, GitHub state, or local checkout conventions.
 - Check git with `git -C <path> rev-parse --show-toplevel`.
 - If not a git work tree, return `kind: "not_git"`.
 - If it is git:
@@ -502,7 +526,7 @@ interface WorkflowDiffResponse {
 The display graph should be derived using Gasworks' model:
 
 1. Map physical bead ids to logical node ids.
-2. Collapse retry and check-loop attempts into their control node.
+2. Group retry and check-loop attempts under their control node without hiding executable loop/body nodes.
 3. Collapse scope-check and workflow-finalize into control badges where appropriate.
 4. Compute logical edges from physical deps, excluding containment/deletion-only edges.
 5. Build scope groups/lanes.
@@ -642,10 +666,15 @@ Exit criteria:
 ### Phase 4: Session Panel and Streaming
 
 - Resolve session links from selected node.
+- If a selected loop body node has session links from multiple iterations, show them as tabs or a compact segmented control labeled by iteration number.
+- If a selected retry-managed node has multiple attempt session links within an iteration, show attempt tabs inside the selected iteration context.
+- Default to the current/latest iteration. Within that iteration, default to the active/running attempt session when one exists; otherwise default to the latest completed attempt.
 - Reuse transcript rendering conventions from Agent Detail/Peek, but frame the content as coding-agent request/response turns.
 - Add `/api/sessions/:id/stream` SSE proxy to supervisor session stream.
 - Fall back to existing peek endpoint when SSE is unavailable.
-- Stream only while the Session tab is visible and the selected node has an active/running session.
+- Stream only while the Session tab is visible and the selected node's selected session is in the current/latest loop iteration and active/running.
+- Previous loop iterations never stream. Render their sessions from fetched transcript history.
+- When a retry node has multiple attempt tabs, only the open attempt may stream. Other attempts remain static until clicked.
 - Preserve tool-call and command-output boundaries where available. This matters because formula nodes are usually coding tasks, not simple status logs.
 
 Exit criteria:
@@ -729,7 +758,7 @@ Recommended answer: use `/workflows/:workflowId` with optional `scope_kind` and 
 
 3. Should active node selection happen automatically?
 
-Recommended answer: only when exactly one node is active/running. Otherwise start with no selected node so the UI does not guess.
+Answer: no. Start with no selected nodes unless `?node=` explicitly names a valid node. The user can click a node when they want session detail.
 
 4. Should the Diff tab show all repo changes or only changes tied to the selected node?
 
@@ -737,11 +766,11 @@ Recommended answer: first version shows the current repo diff for the workflow e
 
 5. Should the Session tab stream by default when a selected node is active?
 
-Recommended answer: yes, but only while the Session tab is visible. If the Diff tab is active, do not keep an unnecessary session stream open.
+Answer: yes, but only while the Session tab is visible, only for the selected node/session, and only when that node belongs to the current/latest loop iteration. Previous loop iterations render static transcript history.
 
 6. Should control nodes such as scope-check and workflow-finalize be full nodes?
 
-Recommended answer: no by default. Render them as badges attached to their target/root, matching Gasworks. Add a debug affordance later if the operator needs to inspect them directly.
+Answer: no for v1. Render them as badges attached to their target/root, matching Gasworks. Add a detail/debug affordance later if the operator needs to inspect them directly.
 
 7. Should no-git folders be treated as an error?
 
@@ -750,6 +779,10 @@ Recommended answer: no. Show a quiet skipped state. The user explicitly asked to
 8. Should the diagram use a graph library?
 
 Recommended answer: not in the first pass. Gasworks already has a layout engine, and this dashboard wants a narrow vertical graph. A simple deterministic layout is easier to control visually. Revisit React Flow only if pan/zoom/large-graph interaction becomes the bottleneck.
+
+9. How should previous loop iterations appear?
+
+Answer: show a subtle stack/history cue on the left graph, but only render/select the latest iteration's body nodes there. Use the Session panel's iteration tabs to navigate prior iterations for the selected logical node.
 
 ## Open Implementation Decision
 
