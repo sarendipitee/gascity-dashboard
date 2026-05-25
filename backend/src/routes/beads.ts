@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Response } from 'express';
 import type { GcBead } from 'gas-city-dashboard-shared';
 import { GcClient } from '../gc-client.js';
 import {
@@ -7,6 +8,8 @@ import {
 } from '../exec.js';
 import type { ExecResult } from '../exec.js';
 import { recordAudit } from '../audit.js';
+
+import { BEAD_ID_RE } from '../lib/beadId.js';
 
 // v0 hardcoded spam filter. Comments here are the load-bearing
 // documentation — "why isn't bead X showing" has a file/line answer.
@@ -23,8 +26,6 @@ function defaultBeadFilter(bead: GcBead): boolean {
   }
   return true;
 }
-
-import { BEAD_ID_RE } from '../lib/beadId.js';
 
 // td-7t24i6 fix: gc default /beads limit is 50, far below the city's working
 // set (~2139 total, ~183 eng-only). Pull a wide window so the spam filter
@@ -156,7 +157,7 @@ async function runBeadAction(
   beadId: string,
   action: 'claim' | 'close' | 'nudge',
   reason: string | undefined,
-  res: import('express').Response,
+  res: Response,
   execBeadAction: NonNullable<BeadsRouterOptions['execBeadAction']>,
   cityPath: string,
 ): Promise<void> {
