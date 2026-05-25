@@ -248,12 +248,12 @@ Recommended behavior:
 - Load the workflow detail from `/api/workflows/:workflowId`.
 - Load git diff status from `/api/workflows/:workflowId/diff`.
 - If `node` is in the query string and exists, select it. Otherwise start with no selected node.
-- Selecting a node updates component state. Updating `?node=` is optional for the first pass; useful for shareable detail links.
+- Selecting a node updates component state. The selected id is a semantic node id, not a physical bead id or a single execution attempt id. Updating `?node=` is optional for the first pass; useful for shareable detail links.
 - Clicking a different node selects it.
 - Clicking the selected node clears selection.
 - Pressing Escape clears selection.
-- The `Session` tab is enabled only when the selected node resolves to a session link.
-- If selected node has no session, the session panel says that no session is attached to this node.
+- The `Session` tab is enabled only when the selected semantic node resolves to at least one execution instance with a session link.
+- If selected node has no execution instance with a session, the session panel says that no session is attached to this node.
 - If no node is selected, the session panel says to select a node.
 - Session content is rendered as a coding-agent transcript:
   - inbound task/request or continuation context
@@ -271,7 +271,7 @@ Desktop:
 - Header: workflow title, formula, status summary, root bead id, store/scope, snapshot timestamp/version.
 - Main content: two-column split.
 - Left column: vertically oriented workflow diagram.
-- Right column: tabs:
+- Right column: evidence panel with tabs:
   - `Diff`
   - `Session`
 
@@ -351,6 +351,17 @@ Each status needs both visual and textual/glyph representation:
 
 ## Data Contracts
 
+### Semantic Nodes and Execution Instances
+
+Keep the runtime model explicit:
+
+- A semantic node is the formula/logical work unit the operator selects in the graph, for example `review-codex`, `apply-fixes`, or `synthesize`.
+- An execution instance is one materialized run of that semantic node, for example `review-codex` in iteration 1, `review-codex` in iteration 2, or retry attempt 2 within iteration 2.
+- The left graph renders semantic nodes for the latest visible execution context.
+- The right evidence panel navigates execution instances for the selected semantic node.
+
+This distinction prevents UI selection from depending on brittle bead ids, step-ref parsing, or whichever retry/loop attempt happens to be current.
+
 ### Workflow Summary Extension
 
 Current `WorkflowLane` should gain enough detail to link reliably:
@@ -390,16 +401,25 @@ interface WorkflowSessionLink {
   sessionName: string;
   assignee: string;
   rigId?: string;
+}
+
+interface WorkflowExecutionInstance {
+  id: string;
+  semanticNodeId: string;
   beadId?: string;
   iteration?: number;
   attempt?: number;
   label?: string;
   status?: WorkflowNodeStatus;
-  active?: boolean;
+  sessionLink?: WorkflowSessionLink | null;
+  currentIteration?: boolean;
+  historical?: boolean;
+  streamable?: boolean;
 }
 
 interface WorkflowDisplayNode {
   id: string;
+  semanticNodeId: string;
   title: string;
   kind: string;
   constructKind: WorkflowConstructKind;
@@ -413,7 +433,8 @@ interface WorkflowDisplayNode {
   attemptBadge?: string;
   attemptCount?: number;
   activeAttempt?: number;
-  sessionLinks: WorkflowSessionLink[];
+  visibleExecutionInstanceId?: string;
+  executionInstances: WorkflowExecutionInstance[];
   controlBadges?: Array<{
     id: string;
     label: string;
@@ -474,6 +495,7 @@ GET /api/sessions/:id/stream
 - Server resolves the execution path. The browser never supplies a filesystem path.
 - The diff represents the current code working tree for that execution folder. It is expected to be mostly source files, tests, package/config files, and docs changed by the selected run.
 - It does not attempt to diff the formula definition, bead metadata, or workflow graph unless those files are actually changed in the execution folder.
+- UI copy must describe the diff as the current working tree for the run's execution folder. Do not imply the diff is node-scoped or causally attributable to the selected run until the backend has per-node baselines or commits.
 - Resolve the path from supervisor-owned run data:
   - Prefer the formula execution `cwd` when the workflow detail exposes it.
   - Then use root/run metadata such as `gc.work_dir` or `work_dir`.
@@ -525,12 +547,14 @@ interface WorkflowDiffResponse {
 
 The display graph should be derived using Gasworks' model:
 
-1. Map physical bead ids to logical node ids.
-2. Group retry and check-loop attempts under their control node without hiding executable loop/body nodes.
-3. Collapse scope-check and workflow-finalize into control badges where appropriate.
-4. Compute logical edges from physical deps, excluding containment/deletion-only edges.
-5. Build scope groups/lanes.
-6. Build display graph for the React page.
+1. Map physical bead ids to semantic node ids.
+2. Build execution instances from materialized beads, preserving iteration, attempt, session, status, and streamability.
+3. Choose the latest/current execution context for the left graph, while preserving historical instances for the evidence panel.
+4. Group retry and check-loop attempts under their control node without hiding latest-iteration executable body nodes.
+5. Collapse scope-check and workflow-finalize into control badges where appropriate.
+6. Compute logical edges from physical deps, excluding containment/deletion-only edges.
+7. Build scope groups/lanes.
+8. Build display graph for the React page.
 
 Initial port scope:
 
@@ -560,6 +584,12 @@ Known limitation:
 
 Some source-level constructs, especially `condition`, `expand`, `map`, and `branch`, may be lost or flattened after compilation unless the source formula/spec is attached. The UI can still show the runtime graph, but exact source-construct labeling needs upstream metadata or source-spec retention.
 
+Historical-only case:
+
+- A semantic node may have execution history but not appear in the latest visible graph because conditions, expansions, or fanout changed between iterations.
+- Do not invent a left-graph node for that case in v1.
+- If the selected semantic node has historical execution instances that are not represented in the latest graph, the evidence panel should label them as historical-only and keep transcripts available from the right side.
+
 ## Frontend Components
 
 Add:
@@ -570,6 +600,7 @@ Add:
 - `frontend/src/components/workflow/WorkflowRunEdges.tsx`
 - `frontend/src/components/workflow/WorkflowRunTabs.tsx`
 - `frontend/src/components/workflow/WorkflowDiffPanel.tsx`
+- `frontend/src/components/workflow/WorkflowNodeEvidencePanel.tsx`
 - `frontend/src/components/workflow/WorkflowNodeSessionPanel.tsx`
 - `frontend/src/hooks/useWorkflowRunDetail.ts`
 - `frontend/src/hooks/useSessionStream.ts`
@@ -638,20 +669,24 @@ Exit criteria:
 ### Phase 2: Presentation Enrichment
 
 - Port/adapt Gasworks' logical mapping, node aggregation, edge filtering, scope groups, and display graph logic.
+- Normalize raw supervisor workflow snapshots into semantic nodes plus execution instances before rendering.
 - Add `constructKind` derivation.
 - Render vertical diagram with construct-specific shapes.
 - Implement exact one-node selection and toggle-off.
+- Add golden snapshot tests: raw supervisor workflow snapshot in, normalized display graph/evidence model out.
 
 Exit criteria:
 
 - Retry/check attempts collapse correctly.
+- Semantic nodes and execution instances are distinct in the shared contract.
 - Running/done/pending/blocked/skipped/failed states render distinctly.
 - Selection state passes keyboard and click tests.
 
 ### Phase 3: Git Diff Panel
 
 - Add backend diff endpoint.
-- Resolve execution path from root store/scope.
+- Resolve execution path from supervisor-owned run data, using execution cwd/work-dir first and rig root if cwd/work-dir metadata is missing.
+- Label the diff as current execution-folder working tree state, not node-specific or run-causal evidence.
 - Add no-git/path-unknown/skipped states.
 - Summarize changed code files from `git status --porcelain=v1`.
 - Render staged and unstaged diffs with prefix-based colorization.
@@ -665,9 +700,9 @@ Exit criteria:
 
 ### Phase 4: Session Panel and Streaming
 
-- Resolve session links from selected node.
-- If a selected loop body node has session links from multiple iterations, show them as tabs or a compact segmented control labeled by iteration number.
-- If a selected retry-managed node has multiple attempt session links within an iteration, show attempt tabs inside the selected iteration context.
+- Resolve execution instances for the selected semantic node.
+- If a selected loop body node has execution instances from multiple iterations, show them as tabs or a compact segmented control labeled by iteration number.
+- If a selected retry-managed node has multiple attempt execution instances within an iteration, show attempt tabs inside the selected iteration context.
 - Default to the current/latest iteration. Within that iteration, default to the active/running attempt session when one exists; otherwise default to the latest completed attempt.
 - Reuse transcript rendering conventions from Agent Detail/Peek, but frame the content as coding-agent request/response turns.
 - Add `/api/sessions/:id/stream` SSE proxy to supervisor session stream.
@@ -675,6 +710,7 @@ Exit criteria:
 - Stream only while the Session tab is visible and the selected node's selected session is in the current/latest loop iteration and active/running.
 - Previous loop iterations never stream. Render their sessions from fetched transcript history.
 - When a retry node has multiple attempt tabs, only the open attempt may stream. Other attempts remain static until clicked.
+- Surface historical-only execution instances in the evidence panel without adding left-graph nodes.
 - Preserve tool-call and command-output boundaries where available. This matters because formula nodes are usually coding tasks, not simple status logs.
 
 Exit criteria:
@@ -709,6 +745,8 @@ Backend:
 - `workflows` route returns 400 for invalid ids/scope.
 - `workflows` route maps upstream 404 without leaking supervisor URL.
 - Enrichment handles retry, check loops, scope-check, workflow-finalize, fanout, skipped, failed.
+- Golden snapshot tests cover raw supervisor snapshots for active and completed graph.v2 runs.
+- Golden snapshot tests assert semantic-node ids stay stable while execution-instance ids vary by iteration/attempt.
 - Diff endpoint:
   - returns `not_git` outside git.
   - returns status and diff inside git.
@@ -726,8 +764,11 @@ Frontend:
 - Detail page loading, error, partial, and empty graph states.
 - Node selection toggles off when clicking selected node.
 - Only one node is selected at a time.
+- Left graph selects semantic nodes, not physical beads or execution instances.
+- Previous loop iterations are represented as subtle stack/history cues, not selectable left-graph nodes.
 - Diff colorization for added, removed, hunk, context, and file header lines.
 - Session panel states for no selection, no session, completed coding-agent transcript, and active stream.
+- Session panel shows iteration/attempt history for the selected semantic node and marks historical-only instances.
 - Transcript rendering for request, assistant response, tool call, tool output, and final response blocks.
 
 Visual:
@@ -740,11 +781,14 @@ Visual:
 ## Risks
 
 - Current dashboard summary lacks scope/store details, so first detail-route resolution may need to search workflow roots by id.
+- The most likely source of implementation mess is confusing semantic nodes with execution instances. Keep that boundary explicit in shared types, selectors, tests, and component names.
 - Exact formula construct type can be impossible to recover from compiled beads unless source/spec metadata is available.
 - Gasworks and this dashboard could drift if enrichment logic is copied instead of shared upstream.
+- Golden snapshot tests reduce drift but do not eliminate it; long term, presentation enrichment should move upstream or into a shared package.
 - Large workflows need graph simplification or virtualization.
-- Git diffs can be large and potentially sensitive; keep them local, capped, and explicit.
+- Git diffs can be large and potentially sensitive; keep them local, capped, and explicit. They are current working-tree evidence, not proof that a selected node made a change.
 - Session streaming adds long-lived connections. It needs cleanup on tab switch, selection change, and route leave.
+- Previous loop iterations can contain nodes that no longer exist in the latest visible graph. The right evidence panel must preserve that history without cluttering the left diagram.
 
 ## Grill-Me Questions
 
