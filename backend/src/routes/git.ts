@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { GitCommit, GitView } from 'gas-city-dashboard-shared';
-import { execGitLog, ExecError } from '../exec.js';
+import { execGitLog as defaultExecGitLog, ExecError } from '../exec.js';
+import type { ExecResult } from '../exec.js';
 import { recordAudit } from '../audit.js';
 import { toWireExecError, toWireInternal500 } from '../lib/sanitise-error.js';
 
@@ -16,7 +17,18 @@ const VIEWS: ReadonlySet<GitView> = new Set([
 
 const PRETTY_FORMAT = '%H%x09%h%x09%an%x09%aI%x09%D%x09%s';
 
-export function gitRouter(): Router {
+interface GitRouterOptions {
+  /**
+   * Injected `git log` runner. Defaults to the real exec wrapper; tests
+   * pass a stub that throws so the catch-arm redaction contract
+   * (gascity-dashboard-big) is unit-testable without spawning git.
+   * Mirrors the DI pattern used by agentsRouter and maintainerRouter.
+   */
+  execGitLog?: (view: string) => Promise<ExecResult>;
+}
+
+export function gitRouter(opts: GitRouterOptions = {}): Router {
+  const execGitLog = opts.execGitLog ?? defaultExecGitLog;
   const router = Router();
 
   router.get('/commits', async (req, res) => {

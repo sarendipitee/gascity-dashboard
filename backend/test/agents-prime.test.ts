@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
 import type { ExecResult } from '../src/exec.js';
+import { ExecError } from '../src/exec.js';
 import { agentsRouter } from '../src/routes/agents.js';
 import { setAuditLogPath } from '../src/audit.js';
 
@@ -182,5 +183,93 @@ describe('GET /api/agents/:alias/prime — non-zero-exit redaction', { concurren
     assert.equal(typeof res.body.kind, 'string');
     assert.equal(typeof res.body.error, 'string');
     assert.equal((res.body.details as { name?: string } | undefined)?.name, 'NonZeroExit');
+  });
+});
+
+// Regression coverage for the catch arms (gascity-dashboard-big).
+//
+// The non-zero-exit redaction above (i53) covers the !exitOk branch, but
+// the two `catch` arms — ExecError spawn (toWireExecError) and the
+// non-ExecError 500 fallback (toWireInternal500) — landed in wave-473
+// without coverage. A revert to raw err.message (or dropping the
+// kind==='spawn' branch) would silently re-leak the operator's binary
+// layout / OS detail. These pin the wire contract on both arms.
+describe('GET /api/agents/:alias/prime — catch-arm err.message redaction', { concurrency: false }, () => {
+  let h: AppHandle | undefined;
+
+  afterEach(async () => {
+    if (h) {
+      await h.close();
+      h = undefined;
+    }
+  });
+
+  test('ExecError spawn arm redacts host path and returns fixed message', async () => {
+    // 'spawn' kind wraps node's "spawn <abs-path-to-gc> ENOENT" exposing
+    // the operator's PATH layout. spawn is neither validation nor
+    // timeout, so it maps to 500; the body must carry the fixed redacted
+    // string, never the raw spawn message.
+    h = await buildApp({
+      prime: async () => {
+        throw new ExecError(
+          'spawn failed: spawn /home/ds/.local/bin/gc ENOENT',
+          'spawn',
+        );
+      },
+    });
+    const res = await getJson(`${h.url}/api/agents/mayor/prime`);
+    assert.equal(res.status, 500);
+    assert.equal(res.body.kind, 'spawn');
+    assert.equal(
+      res.body.error,
+      'subprocess could not be started',
+      'spawn arm must return the fixed redacted message',
+    );
+    const wire = JSON.stringify(res.body);
+    assert.ok(!wire.includes('/home/ds'), `response leaks operator home: ${wire}`);
+    assert.ok(!wire.includes('.local/bin'), `response leaks binary path: ${wire}`);
+    assert.ok(!wire.includes('ENOENT'), `response leaks OS errno: ${wire}`);
+  });
+
+  test('ExecError timeout arm surfaces 504 with safe pre-authored message', async () => {
+    // timeout carries a pre-authored safe string by ExecError
+    // construction; it passes through but must map to 504.
+    h = await buildApp({
+      prime: async () => {
+        throw new ExecError('gc prime timed out', 'timeout');
+      },
+    });
+    const res = await getJson(`${h.url}/api/agents/mayor/prime`);
+    assert.equal(res.status, 504);
+    assert.equal(res.body.kind, 'timeout');
+  });
+
+  test('non-ExecError 500 fallback redacts raw err.message', async () => {
+    // Any unexpected throw must not echo its raw message. details.name
+    // (Error class) is the only safe channel; OS detail stays in
+    // journalctl via the route's console.warn.
+    const leakyErr = new Error(
+      'connect ECONNREFUSED 127.0.0.1:1 (interface lo) at /var/run/sock',
+    );
+    leakyErr.name = 'NetworkError';
+    h = await buildApp({
+      prime: async () => {
+        throw leakyErr;
+      },
+    });
+    const res = await getJson(`${h.url}/api/agents/mayor/prime`);
+    assert.equal(res.status, 500);
+    assert.equal(res.body.kind, 'internal');
+    const details = res.body.details as { name?: string; message?: string };
+    assert.equal(details?.message, undefined, 'details.message must be redacted');
+    assert.equal(
+      details?.name,
+      'NetworkError',
+      'details.name must carry the Error class discriminator',
+    );
+    const wire = JSON.stringify(res.body);
+    assert.ok(!wire.includes('ECONNREFUSED'), `response leaks ECONNREFUSED: ${wire}`);
+    assert.ok(!wire.includes('127.0.0.1'), `response leaks host:port: ${wire}`);
+    assert.ok(!wire.includes('/var/run/sock'), `response leaks socket path: ${wire}`);
   });
 });
