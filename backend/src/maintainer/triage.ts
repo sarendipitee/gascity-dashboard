@@ -359,10 +359,12 @@ export function computeHasInFlightPr(items: TriageItem[]): void {
  *      stays on the PR (or falls to the next non-blocked candidate
  *      if the PR is not the top scorer).
  *   2. The legacy parent-transfer from PR → parent issue only fires
- *      when the parent issue is still a candidate after (1). With
- *      step (1) in place, this is effectively a no-op for the
- *      in-flight-PR case but defends against future isMarkCandidate
- *      changes that might mark issues directly.
+ *      when the parent issue has NO in-flight PR (i.e. the winning PR
+ *      is merged / closed, so the eye should fall back to the still-open
+ *      problem). An issue with an in-flight PR never receives the mark,
+ *      regardless of which item won — this is the direction-correct
+ *      forward-defense against an isMarkCandidate that marks issues
+ *      directly (gascity-dashboard-443).
  *
  * Extracted from composeEnvelope so the GET overlay (gascity-dashboard-9qs)
  * can re-run the winnow after splicing slung-state onto items at serve
@@ -407,18 +409,40 @@ export function selectOneMark(items: TriageItem[]): void {
     if (item.is_marked && item !== topMark) item.is_marked = false;
   }
 
-  // (3) Legacy parent-transfer (PR → parent issue) gated on the parent
-  // still being a candidate after step (1). After bs2 this effectively
-  // never fires for PRs that close an issue, because step (1) removes
-  // the parent from the candidate set. The guard remains so a future
-  // candidate model that marks issues directly still gets the pairing
-  // behaviour without re-introducing the bs2 regression.
+  // (3) Legacy parent-transfer (PR → parent issue): when the winning mark
+  // is a PR, the mark belongs on the parent issue ONLY when there is no
+  // in-flight PR for that issue — i.e. the PR that won is no longer an
+  // open action item (merged / closed), so the eye should fall back to
+  // the still-open problem.
+  //
+  // gascity-dashboard-443: the guard is keyed on the step-(1) in-flight
+  // set, NOT on `parent.is_marked`. The previous `parent.is_marked` check
+  // was structurally wrong in two ways:
+  //   - It is unconditionally dead today: step (2) clears is_marked on
+  //     every non-topMark item, so the parent is always unmarked here.
+  //   - It points the wrong direction for the forward-defense case the
+  //     block claims to handle. If isMarkCandidate is ever extended to
+  //     mark issues directly, a parent issue that was the top scorer in
+  //     step (2) would arrive with is_marked=true and WRONGLY trigger a
+  //     transfer from a winning in-flight PR to its parent issue —
+  //     re-introducing the exact bs2 regression (the mark must stay on
+  //     the action item, the PR).
+  //
+  // Keying on `issueNumbersWithInFlightPr` makes the intent explicit and
+  // direction-correct: an issue with an in-flight PR NEVER receives the
+  // mark (bs2), regardless of which item won step (2). The transfer fires
+  // only for a parent with no in-flight PR (its linking PR is the merged /
+  // closed topMark) and which is not itself the top scorer.
   if (topMark !== null && topMark.kind === 'pr' && topMark.linked_numbers.length > 0) {
     for (const linkedNum of topMark.linked_numbers) {
       const parent = items.find(
         (i) => i.kind === 'issue' && i.number === linkedNum,
       );
-      if (parent !== undefined && parent.is_marked) {
+      if (
+        parent !== undefined &&
+        parent !== topMark &&
+        !issueNumbersWithInFlightPr.has(parent.number)
+      ) {
         topMark.is_marked = false;
         parent.is_marked = true;
         break;
