@@ -8,6 +8,7 @@ import {
 } from '../exec.js';
 import type { ExecResult } from '../exec.js';
 import { recordAudit } from '../audit.js';
+import { toWireExecError, toWireInternal500 } from '../lib/sanitise-error.js';
 
 import { BEAD_ID_RE } from '../lib/beadId.js';
 
@@ -86,9 +87,12 @@ export function beadsRouter(
       // fetch-level failures embeds OS detail (ECONNREFUSED, host:port);
       // details.name (Error class) is the only safe channel for the browser.
       console.warn(`[beads] /api/beads failed: ${(err as Error).message}`);
-      res
-        .status(502)
-        .json({ error: 'failed to list beads', kind: 'upstream', details: { name: (err as Error).name ?? 'Error' } });
+      const wire = toWireInternal500(err, {
+        status: 502,
+        error: 'failed to list beads',
+        kind: 'upstream',
+      });
+      res.status(wire.status).json(wire.body);
     }
   });
 
@@ -133,7 +137,12 @@ export function beadsRouter(
       // full message from the 404-fallback extraction at the top of the
       // catch block — log it for journalctl, don't ship it to the browser.
       console.warn(`[beads] /api/beads/:id failed: ${msg}`);
-      res.status(502).json({ error: 'failed to fetch bead', kind: 'upstream', details: { name: (err as Error).name ?? 'Error' } });
+      const wire = toWireInternal500(err, {
+        status: 502,
+        error: 'failed to fetch bead',
+        kind: 'upstream',
+      });
+      res.status(wire.status).json(wire.body);
     }
   });
 
@@ -175,10 +184,19 @@ async function runBeadAction(
       duration_ms: result.durationMs,
     });
     if (result.exitCode !== 0) {
+      // gascity-dashboard-i0b: do NOT echo raw stderr on the wire. gc's
+      // stderr is implementation-defined and can embed host paths / socket
+      // paths / ENOENT. Mirror the i53 (agents.ts) + 473 catch-arm pattern:
+      // stderr stays server-side in console.warn for journalctl; the wire
+      // carries kind + a fixed message plus details:{name} for shape parity
+      // with the catch-all 500.
+      console.warn(
+        `[beads] runBeadAction ${action} non-zero exit ${result.exitCode}: ${result.stderr}`,
+      );
       res.status(502).json({
         error: `gc command failed with exit ${result.exitCode}`,
         kind: 'upstream',
-        details: { stderr: result.stderr.slice(0, 1024) },
+        details: { name: 'NonZeroExit' },
       });
       return;
     }
@@ -192,20 +210,22 @@ async function runBeadAction(
       // ExecError construction (see backend/src/exec.ts), so they pass
       // through. journalctl retains the full message via the source-side
       // ExecError instantiation.
-      const wireMessage =
-        err.kind === 'spawn' ? 'subprocess could not be started' : err.message;
       if (err.kind === 'spawn') {
         console.warn(`[beads] runBeadAction spawn failed: ${err.message}`);
       }
-      res.status(status).json({ error: wireMessage, kind: err.kind });
+      const wire = toWireExecError(err, status);
+      res.status(wire.status).json(wire.body);
       return;
     }
     // gascity-dashboard-473: mirror the ayr sr6 redaction. Raw err.message
     // from unexpected throws can embed OS detail; details.name (Error
     // class) is the only safe channel for the browser.
     console.warn(`[beads] runBeadAction failed: ${(err as Error).message}`);
-    res
-      .status(500)
-      .json({ error: 'internal error', kind: 'internal', details: { name: (err as Error).name ?? 'Error' } });
+    const wire = toWireInternal500(err, {
+      status: 500,
+      error: 'internal error',
+      kind: 'internal',
+    });
+    res.status(wire.status).json(wire.body);
   }
 }
