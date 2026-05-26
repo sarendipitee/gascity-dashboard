@@ -116,4 +116,90 @@ describe('selectOneMark — in-flight PR excludes parent issue from the mark (bs
     assert.equal(parent.is_marked, false);
     assert.equal(pr.is_marked, true);
   });
+
+  // gascity-dashboard-443: forward-defense for a future isMarkCandidate
+  // that marks issues directly. Today isMarkCandidate rejects issues, so
+  // a parent issue never arrives with is_marked=true. These tests simulate
+  // the extended-candidate world by constructing a marked parent issue
+  // alongside its marked in-flight PR child, and assert the bs2 intent
+  // still holds: the mark stays on the PR (the action item), never the
+  // issue. The old step-(3) guard (parent.is_marked) would have wrongly
+  // transferred the mark to the parent issue in this world.
+  test('marked PR + marked parent issue, both candidate: mark stays on the PR', () => {
+    const issue = makeIssue({
+      number: 600,
+      // Simulate a future isMarkCandidate that marks issues directly.
+      is_marked: true,
+      triage_score: 305,
+    });
+    const pr = makePr({
+      number: 601,
+      linked_numbers: [600],
+      status: 'open',
+      // PR is the top scorer so it wins step (2).
+      triage_score: 350,
+    });
+    selectOneMark([issue, pr]);
+    assert.equal(
+      issue.is_marked,
+      false,
+      'parent issue must NOT carry the mark even when it arrives as a candidate',
+    );
+    assert.equal(
+      pr.is_marked,
+      true,
+      'PR keeps the mark — it is the action queue (bs2)',
+    );
+  });
+
+  test('top mark is a merged PR whose parent has no in-flight PR: mark transfers to the open parent issue', () => {
+    // gascity-dashboard-443: the corrected guard keys on the in-flight
+    // set, not on parent.is_marked (which step (2) always clears). When
+    // the winning PR is merged/closed it is no longer an action item, so
+    // the mark falls back to the still-open parent issue. The OLD guard
+    // (parent.is_marked) was dead here and left the mark on the merged PR.
+    const issue = makeIssue({ number: 800 });
+    const pr = makePr({
+      number: 801,
+      linked_numbers: [800],
+      // Merged → NOT in-flight, so step (1) does not exclude the parent.
+      status: 'merged',
+    });
+    selectOneMark([issue, pr]);
+    assert.equal(
+      pr.is_marked,
+      false,
+      'merged PR is no longer an action item — it gives up the mark',
+    );
+    assert.equal(
+      issue.is_marked,
+      true,
+      'mark transfers to the still-open parent issue (no in-flight PR)',
+    );
+  });
+
+  test('marked parent issue out-scores its in-flight PR child: PR still keeps the mark', () => {
+    // The adversarial case from the bead: if the parent issue were the
+    // top scorer in step (2), the parent-transfer must NOT fire to hand
+    // the mark back to it, because step (1) already excluded the issue
+    // (it has an in-flight PR). The PR is the only surviving candidate.
+    const issue = makeIssue({
+      number: 700,
+      is_marked: true,
+      triage_score: 400,
+    });
+    const pr = makePr({
+      number: 701,
+      linked_numbers: [700],
+      status: 'open',
+      triage_score: 350,
+    });
+    selectOneMark([issue, pr]);
+    assert.equal(
+      issue.is_marked,
+      false,
+      'parent issue with an in-flight PR is excluded and never re-marked',
+    );
+    assert.equal(pr.is_marked, true, 'mark stays on the in-flight PR');
+  });
 });
