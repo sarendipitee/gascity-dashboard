@@ -1,0 +1,108 @@
+import { Router } from 'express';
+import type { GcBead, GcSession } from 'gas-city-dashboard-shared';
+import { GcClient } from '../gc-client.js';
+import { parseRef } from '../links/node-ref.js';
+import { buildRelationIndex } from '../links/relation-index.js';
+import { buildLinkView } from '../links/build-link-view.js';
+import { ResolutionRollup } from '../links/instrumentation.js';
+import { toWireInternal500 } from '../lib/sanitise-error.js';
+
+// GET /api/links/:ref — bead-ID cross-entity linked view (gascity-dashboard-j4x).
+//
+// Resolves any input ref (bead-id, pr/<n>, issue/<n>, session-id,
+// workflow-id) to its bead-id(s), builds the per-snapshot relation index
+// over the city bead set + session list, and returns a one-hop
+// EntityLinkView. Read-only; no gh fan-out (the bead→PR/issue edges are
+// authoritative numbers, but the PR/issue entities are rendered as honest
+// unresolved rows — PG2 safety valve).
+//
+// GET /api/links/_stats — the R11 rollup consumer (RK4): per-edge-type
+// resolution rates for the Activity/Health register.
+
+const LINKS_FETCH_LIMIT = 2000;
+
+export interface LinksRouterOptions {
+  /** Process-scoped resolution rollup (R11). Defaults to a fresh instance. */
+  rollup?: ResolutionRollup;
+  now?: () => Date;
+}
+
+export function linksRouter(gc: GcClient, opts: LinksRouterOptions = {}): Router {
+  const router = Router();
+  const rollup = opts.rollup ?? new ResolutionRollup();
+
+  // _stats must be registered before /:ref so it isn't captured as a ref.
+  router.get('/_stats', (_req, res) => {
+    res.json({ stats: rollup.snapshot() });
+  });
+
+  router.get('/:ref', async (req, res) => {
+    const parsed = parseRef(req.params.ref);
+    if (!parsed.ok) {
+      res.status(400).json({ error: parsed.error, kind: 'validation' });
+      return;
+    }
+
+    try {
+      const { beads, sessions, partial, supervisorFetchedAt } =
+        await fetchSources(gc);
+      const index = buildRelationIndex(beads, sessions, gc.cityName);
+      const view = buildLinkView(index, parsed, {
+        partial,
+        supervisorFetchedAt,
+        // No GitHub source contributes yet (open-only gh fan-out avoided).
+        // The bead→PR/issue numbers resolve to unresolved rows; their
+        // fetchedAt stays null until a real GitHub join lands (R8/OQ#2).
+        githubFetchedAt: null,
+        now: opts.now,
+        recorder: rollup.recorder(),
+      });
+      res.json(view);
+    } catch (err) {
+      if (GcClient.isTimeoutError(err)) {
+        res
+          .status(504)
+          .json({ error: 'gc supervisor did not respond in time', kind: 'upstream-timeout' });
+        return;
+      }
+      console.warn(`[links] /api/links/:ref failed: ${(err as Error).message}`);
+      const wire = toWireInternal500(err, {
+        status: 502,
+        error: 'failed to build linked view',
+        kind: 'upstream',
+      });
+      res.status(wire.status).json(wire.body);
+    }
+  });
+
+  return router;
+}
+
+interface Sources {
+  beads: GcBead[];
+  sessions: GcSession[];
+  partial: boolean;
+  supervisorFetchedAt: string;
+}
+
+/**
+ * Fetch the bead set + session list with allSettled so a single failed
+ * source degrades the view to `partial` rather than collapsing to a 5xx
+ * (mirrors routes/workflows.ts). The bead list is the load-bearing
+ * source: if it fails the request errors (no index is possible).
+ */
+async function fetchSources(gc: GcClient): Promise<Sources> {
+  const supervisorFetchedAt = new Date().toISOString();
+  const beadList = await gc.listBeads(undefined, { limit: LINKS_FETCH_LIMIT });
+  const beads = Array.isArray(beadList.items) ? beadList.items : [];
+  let sessions: GcSession[] = [];
+  let partial = false;
+  try {
+    const sessionList = await gc.listSessions();
+    sessions = Array.isArray(sessionList.items) ? sessionList.items : [];
+  } catch (err) {
+    console.warn(`[links] session fetch failed; serving partial: ${(err as Error).message}`);
+    partial = true;
+  }
+  return { beads, sessions, partial, supervisorFetchedAt };
+}
