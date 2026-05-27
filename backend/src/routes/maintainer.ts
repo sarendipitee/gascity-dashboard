@@ -4,6 +4,7 @@ import type {
   ContributorStat,
   GcSession,
   MaintainerTriage,
+  TriageItem,
 } from 'gas-city-dashboard-shared';
 import { recordAudit } from '../audit.js';
 import {
@@ -485,13 +486,16 @@ function composeBeadText(intent: SlingIntent, htmlUrl: string): string {
 }
 
 function countItems(envelope: MaintainerTriage): number {
-  return envelope.tiers.reduce(
+  const inTiers = envelope.tiers.reduce(
     (n, tier) =>
       n +
       tier.unclustered.length +
       tier.clusters.reduce((m, c) => m + c.items.length, 0),
     0,
   );
+  // Include the lifted slung section so the audit count reflects every
+  // item served, not just those still in a tier (gascity-dashboard-2yr).
+  return inTiers + (envelope.slung_section?.length ?? 0);
 }
 
 // ── Slung-state overlay (gascity-dashboard-9qs) ──────────────────────
@@ -558,12 +562,53 @@ async function applySlungOverlay(
 ): Promise<void> {
   const state = await readSlungState(slungStatePath);
   const allItems = collectItems(envelope);
+  const slung: TriageItem[] = [];
   for (const item of allItems) {
     const persisted = state[slungKey(item.kind, item.number)];
-    item.slung =
-      persisted !== undefined && item.triage_assessment == null ? persisted : null;
+    // Active slung: a persisted entry AND not yet vetted. Vetted items
+    // force slung=null (the agent already delivered; slung was the
+    // placeholder while waiting) and stay in their tier.
+    const active = persisted !== undefined && item.triage_assessment == null;
+    item.slung = active ? persisted : null;
     item.is_marked = item.tier !== null && isMarkCandidate(item, item.tier);
+    if (active) slung.push(item);
   }
+  // Winnow the One Mark BEFORE lifting slung items out of the tiers.
+  // selectOneMark reads the flat list (not tier membership), and slung
+  // items already have is_marked=false (isMarkCandidate excludes them),
+  // so the mark lands on the top surviving in-tier candidate.
   selectOneMark(allItems);
+  // Lift active-slung items out of their tier rows into a dedicated
+  // section (gascity-dashboard-2yr) so the operator sees the in-flight
+  // batch as a group instead of inline markers. Most-recent sling on top.
+  if (slung.length > 0) {
+    removeItemsFromTiers(envelope, slung);
+    slung.sort((a, b) =>
+      (b.slung?.slung_at ?? '').localeCompare(a.slung?.slung_at ?? ''),
+    );
+  }
+  envelope.slung_section = slung;
+}
+
+/**
+ * Remove the given items (by kind:number identity) from every tier's
+ * clusters and unclustered lists, dropping any cluster left empty so the
+ * UI never renders a zero-row cluster block. Immutable per the
+ * coding-style rule: rebuilds each tier's arrays rather than splicing in
+ * place. Used by applySlungOverlay to lift slung items into their own
+ * section.
+ */
+function removeItemsFromTiers(
+  envelope: MaintainerTriage,
+  toRemove: readonly TriageItem[],
+): void {
+  const keys = new Set(toRemove.map((it) => slungKey(it.kind, it.number)));
+  const keep = (it: TriageItem): boolean => !keys.has(slungKey(it.kind, it.number));
+  for (const tier of envelope.tiers) {
+    tier.clusters = tier.clusters
+      .map((cluster) => ({ ...cluster, items: cluster.items.filter(keep) }))
+      .filter((cluster) => cluster.items.length > 0);
+    tier.unclustered = tier.unclustered.filter(keep);
+  }
 }
 

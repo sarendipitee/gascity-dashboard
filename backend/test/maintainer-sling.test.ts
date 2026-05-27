@@ -981,13 +981,19 @@ describe('GET /api/maintainer/triage — slung overlay', { concurrency: false },
     });
     assert.equal(slingRes.status, 200);
 
-    // GET overlay should now exclude 47 and put the mark on 48.
+    // GET overlay should now LIFT 47 out of its tier into slung_section
+    // (gascity-dashboard-2yr) and put the mark on 48.
     const after = await fetch(`${h.url}/api/maintainer/triage`).then((r) => r.json()) as MaintainerTriage;
     const afterItems = after.tiers[0]!.unclustered;
-    const slungItem = afterItems.find((it) => it.number === 47);
     const nextMarked = afterItems.find((it) => it.number === 48);
 
-    assert.ok(slungItem?.slung, 'item 47 should carry slung state after the sling');
+    assert.equal(
+      afterItems.find((it) => it.number === 47),
+      undefined,
+      'slung item 47 should be lifted out of its tier',
+    );
+    const slungItem = after.slung_section?.find((it) => it.number === 47);
+    assert.ok(slungItem?.slung, 'item 47 should carry slung state in slung_section');
     assert.equal(slungItem!.slung.target, 'mayor');
     assert.equal(slungItem!.slung.bead_id, 'gc-255139');
     assert.equal(slungItem!.is_marked, false, 'slung item should not carry the mark');
@@ -1038,6 +1044,88 @@ describe('GET /api/maintainer/triage — slung overlay', { concurrency: false },
     const env = await res.json() as MaintainerTriage;
     const item = env.tiers[0]!.unclustered.find((it) => it.number === 60)!;
     assert.equal(item.is_marked, true, 'item 60 still the mark; orphan slung-state for 999 is silently ignored');
+    assert.deepEqual(env.slung_section, [], 'no active slings → empty section');
+  });
+
+  test('multiple slung items are all lifted into slung_section, newest first', async () => {
+    h = await buildApp();
+    await writeEnvelope(
+      h,
+      envelopeWithMarkedCandidates([
+        makePr({ number: 70 }),
+        makePr({ number: 71 }),
+        makePr({ number: 72 }),
+      ]),
+    );
+
+    // Plant three active slung entries with distinct slung_at so we can
+    // assert the section is sorted newest-first.
+    await writeSlungEntry(slungStatePathFor(h), slungKey('pr', 70), {
+      slung_at: '2026-05-24T08:00:00Z',
+      target: 'chief-of-staff',
+      bead_id: 'gc-70',
+    });
+    await writeSlungEntry(slungStatePathFor(h), slungKey('pr', 71), {
+      slung_at: '2026-05-24T10:00:00Z',
+      target: 'chief-of-staff',
+      bead_id: 'gc-71',
+    });
+    await writeSlungEntry(slungStatePathFor(h), slungKey('pr', 72), {
+      slung_at: '2026-05-24T09:00:00Z',
+      target: 'chief-of-staff',
+      bead_id: 'gc-72',
+    });
+
+    const env = await fetch(`${h.url}/api/maintainer/triage`).then((r) => r.json()) as MaintainerTriage;
+
+    assert.deepEqual(
+      env.tiers[0]!.unclustered.map((it) => it.number),
+      [],
+      'all three slung items lifted out of the tier',
+    );
+    assert.deepEqual(
+      env.slung_section?.map((it) => it.number),
+      [71, 72, 70],
+      'slung_section sorted by slung_at descending (newest batch on top)',
+    );
+    assert.ok(
+      env.slung_section?.every((it) => it.slung != null),
+      'every slung_section item carries non-null slung state',
+    );
+  });
+
+  test('slung item inside a cluster is lifted out and the emptied cluster is dropped', async () => {
+    h = await buildApp();
+    const clustered = makePr({ number: 80, cluster_id: 'c1' });
+    const envelope: MaintainerTriage = {
+      computed_at: '2026-05-24T00:00:00Z',
+      repo: 'gastownhall/gascity',
+      tiers: [
+        {
+          tier: 'regression_breaking',
+          clusters: [{ cluster_id: 'c1', files: ['a.go'], items: [clustered], lines_pending: 50 }],
+          unclustered: [],
+        },
+        { tier: 'regression', clusters: [], unclustered: [] },
+        { tier: 'stability', clusters: [], unclustered: [] },
+      ],
+      totals: { issues_open: 0, prs_open: 1 },
+    };
+    await writeEnvelope(h, envelope);
+
+    await writeSlungEntry(slungStatePathFor(h), slungKey('pr', 80), {
+      slung_at: '2026-05-24T00:00:00Z',
+      target: 'chief-of-staff',
+      bead_id: 'gc-80',
+    });
+
+    const env = await fetch(`${h.url}/api/maintainer/triage`).then((r) => r.json()) as MaintainerTriage;
+    assert.deepEqual(env.tiers[0]!.clusters, [], 'cluster emptied by the lift is dropped');
+    assert.deepEqual(
+      env.slung_section?.map((it) => it.number),
+      [80],
+      'the clustered slung item moved to slung_section',
+    );
   });
 });
 
@@ -1230,8 +1318,9 @@ describe('POST /api/maintainer/sling — target role resolution (gascity-dashboa
     });
 
     const env = (await fetch(`${h.url}/api/maintainer/triage`).then((r) => r.json())) as MaintainerTriage;
-    const item = env.tiers[0]!.unclustered.find((it) => it.number === 47)!;
-    assert.ok(item.slung);
+    // Slung items are lifted into slung_section (gascity-dashboard-2yr).
+    const item = env.slung_section?.find((it) => it.number === 47)!;
+    assert.ok(item?.slung);
     assert.equal(item.slung.resolved_session_name, 'oversight-rig__chief-of-staff');
   });
 });

@@ -413,6 +413,13 @@ export function MaintainerPage() {
       {data ? (
         <>
           <div className="space-y-14">
+            {data.slung_section !== undefined && data.slung_section.length > 0 && (
+              <SlungSection
+                items={data.slung_section}
+                collapsed={collapse.isCollapsed('slung')}
+                onToggle={() => collapse.toggle('slung')}
+              />
+            )}
             {data.tiers
               .filter((tier) => !focusBreaking || tier.tier === 'regression_breaking')
               .map((tier) => {
@@ -676,6 +683,57 @@ export function TierSection({
             </div>
           )}
         </div>
+      )}
+    </section>
+  );
+}
+
+// Stable empty selection for read-only RowLists (the slung section).
+// Module-level so a re-render doesn't hand RowList a fresh Set each time.
+const NO_SELECTION: ReadonlySet<string> = new Set();
+
+// In-flight work section (gascity-dashboard-2yr). Items the operator
+// slung to a triage agent that are not yet vetted, lifted out of the
+// backlog tiers by the serve-time overlay (backend applySlungOverlay)
+// into `MaintainerTriage.slung_section`. Rendered at the TOP of the
+// triage view so a bulk-sling batch visibly goes somewhere instead of
+// leaving inline markers scattered across tiers.
+//
+// Read-only by design: no selection checkboxes (these items are already
+// in flight, not bulk-sling candidates). Each row carries the inline
+// `slung →` drill-in link via RowList → SlungLink. Header matches the
+// tier-header register so the page reads in one editorial voice.
+//
+// Exported for vitest isolation, mirroring TierSection / SelectionActionBar.
+export function SlungSection({
+  items,
+  collapsed,
+  onToggle,
+}: {
+  items: TriageItem[];
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <section>
+      <header className="mb-6 pb-2 border-b border-rule">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="w-full flex items-baseline justify-between gap-4 focus-mark"
+          aria-expanded={!collapsed}
+        >
+          <h2 className="text-headline font-semibold uppercase tracking-wide text-fg-muted text-left">
+            <CollapseGlyph collapsed={collapsed} />
+            Slung <span aria-hidden>·</span> awaiting agent
+          </h2>
+          <span className="text-label uppercase tracking-wider text-fg-muted tnum">
+            {items.length} {items.length === 1 ? 'item' : 'items'}
+          </span>
+        </button>
+      </header>
+      {collapsed ? null : (
+        <RowList items={items} selection={NO_SELECTION} onToggleSelect={null} />
       )}
     </section>
   );
