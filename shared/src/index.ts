@@ -608,6 +608,26 @@ export interface MaintainerTriage {
   repo: string;
   /** Top-level tiers in fixed order: regression_breaking, regression, stability. */
   tiers: TriageTierSection[];
+  /**
+   * Items currently slung to a triage agent and not yet vetted
+   * (gascity-dashboard-2yr). The serve-time slung overlay LIFTS these out
+   * of `tiers` so the operator sees in-flight work as one dedicated group
+   * rather than inline `slung →` markers scattered across tier rows.
+   *
+   * Every item here carries non-null `slung`. Sorted by `slung.slung_at`
+   * descending so the most-recent batch surfaces on top. Empty when
+   * nothing is in flight.
+   *
+   * Lifecycle: an item is `awaiting` (in a tier) → `slung` (here) →
+   * `vetted` (back in its tier; the overlay forces `slung=null` once
+   * `triage_assessment` lands, so it leaves this section). Because slung
+   * items are removed from `tiers`, the per-tier vetted/awaiting tally and
+   * item counts naturally exclude them.
+   *
+   * Optional so envelopes and fixtures predating this field still
+   * typecheck; readers MUST treat `undefined` as an empty section.
+   */
+  slung_section?: TriageItem[];
   totals: {
     issues_open: number;
     prs_open: number;
