@@ -6,14 +6,22 @@ import { spawnSync } from 'node:child_process';
 const checkOnly = process.argv.includes('--check');
 const schemaPath = path.resolve('backend/openapi/gc-supervisor.openapi.json');
 const outputPath = path.resolve('backend/src/generated/gc-supervisor.ts');
+const schemaOutputPath = path.resolve('backend/src/generated/gc-supervisor-schemas.ts');
 const cliPath = path.resolve('node_modules/openapi-typescript/bin/cli.js');
 const header = [
   '/* eslint-disable */',
   '// Generated from backend/openapi/gc-supervisor.openapi.json. Do not edit.',
   '',
 ].join('\n');
+const runtimeSchemaRoots = [
+  'FormulaDetailResponse',
+  'HealthOutputBody',
+  'ListBodySessionResponse',
+  'SessionTranscriptGetResponse',
+  'WorkflowSnapshotResponse',
+];
 
-async function generate(toPath) {
+async function generateTypes(toPath) {
   const result = spawnSync(
     process.execPath,
     [cliPath, schemaPath, '--output', toPath, '--export-type'],
@@ -30,18 +38,53 @@ async function generate(toPath) {
   );
 }
 
+async function generateRuntimeSchemas(toPath) {
+  const openapi = JSON.parse(await readFile(schemaPath, 'utf8'));
+  const allSchemas = openapi?.components?.schemas;
+  if (!isRecord(allSchemas)) {
+    throw new Error('OpenAPI schema is missing components.schemas');
+  }
+  const names = collectSchemaClosure(allSchemas, runtimeSchemaRoots);
+  const selected = Object.fromEntries(
+    names.map((name) => [name, normalizeJson(allSchemas[name])]),
+  );
+  const source = [
+    header,
+    'export const gcSupervisorComponentSchemas: Record<string, unknown> = ',
+    JSON.stringify(selected, null, 2),
+    ';\n',
+  ].join('');
+  await writeFile(toPath, source, 'utf8');
+}
+
 if (checkOnly) {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'gc-supervisor-openapi-'));
-  const tmpPath = path.join(tmpDir, 'gc-supervisor.ts');
+  const tmpTypesPath = path.join(tmpDir, 'gc-supervisor.ts');
+  const tmpSchemasPath = path.join(tmpDir, 'gc-supervisor-schemas.ts');
   try {
-    await generate(tmpPath);
-    const [expected, actual] = await Promise.all([
-      readFile(tmpPath, 'utf8'),
-      readFile(outputPath, 'utf8'),
+    await Promise.all([
+      generateTypes(tmpTypesPath),
+      generateRuntimeSchemas(tmpSchemasPath),
     ]);
-    if (expected !== actual) {
+    const [
+      expectedTypes,
+      actualTypes,
+      expectedSchemas,
+      actualSchemas,
+    ] = await Promise.all([
+      readFile(tmpTypesPath, 'utf8'),
+      readFile(outputPath, 'utf8'),
+      readFile(tmpSchemasPath, 'utf8'),
+      readFile(schemaOutputPath, 'utf8'),
+    ]);
+    if (expectedTypes !== actualTypes) {
       throw new Error(
         'backend/src/generated/gc-supervisor.ts is out of date. Run npm run openapi:gc-supervisor:generate.',
+      );
+    }
+    if (expectedSchemas !== actualSchemas) {
+      throw new Error(
+        'backend/src/generated/gc-supervisor-schemas.ts is out of date. Run npm run openapi:gc-supervisor:generate.',
       );
     }
   } finally {
@@ -49,6 +92,61 @@ if (checkOnly) {
   }
   console.log('generated gc supervisor client is up to date');
 } else {
-  await generate(outputPath);
+  await Promise.all([
+    generateTypes(outputPath),
+    generateRuntimeSchemas(schemaOutputPath),
+  ]);
   console.log(`generated ${path.relative(process.cwd(), outputPath)}`);
+  console.log(`generated ${path.relative(process.cwd(), schemaOutputPath)}`);
+}
+
+function collectSchemaClosure(allSchemas, rootNames) {
+  const visited = new Set();
+  const visitName = (name) => {
+    if (visited.has(name)) return;
+    const schema = allSchemas[name];
+    if (schema === undefined) {
+      throw new Error(`OpenAPI component schema ${name} not found`);
+    }
+    visited.add(name);
+    visitSchema(schema);
+  };
+  const visitSchema = (value) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visitSchema(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const ref = value.$ref;
+    if (typeof ref === 'string') {
+      visitName(componentNameFromRef(ref));
+    }
+    for (const nested of Object.values(value)) {
+      visitSchema(nested);
+    }
+  };
+  for (const name of rootNames) visitName(name);
+  return [...visited].sort();
+}
+
+function componentNameFromRef(ref) {
+  const prefix = '#/components/schemas/';
+  if (!ref.startsWith(prefix)) {
+    throw new Error(`unsupported OpenAPI ref ${ref}`);
+  }
+  return ref.slice(prefix.length);
+}
+
+function normalizeJson(value) {
+  if (Array.isArray(value)) return value.map(normalizeJson);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, normalizeJson(value[key])]),
+  );
+}
+
+function isRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

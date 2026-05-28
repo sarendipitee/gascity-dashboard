@@ -24,7 +24,7 @@ function startFake(): Promise<Fake> {
     let handler: Handler = (_req, res) => {
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ items: [] }));
+      res.end(JSON.stringify({ items: [], total: 0 }));
     };
     let hits = 0;
     const sockets = new Set<import('node:net').Socket>();
@@ -166,7 +166,7 @@ describe('GcClient request coalescing', () => {
       const release = () => {
         res.statusCode = 200;
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
       };
       if (pending) {
         // Subsequent hits should NOT happen if coalescing works.
@@ -231,7 +231,7 @@ describe('GcClient request coalescing', () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ items: [] }));
+      res.end(JSON.stringify({ items: [], total: 0 }));
     });
     const gc = new GcClient({
       baseUrl: fake.baseUrl,
@@ -380,6 +380,23 @@ describe('GcClient error handling', () => {
     await assert.rejects(
       () => gc.listSessions(),
       /invalid gc supervisor listSessions payload/i,
+    );
+  });
+
+  test('rejects payloads that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listSessions(),
+      /invalid gc supervisor listSessions payload: payload\.total must be present/i,
     );
   });
 
@@ -762,7 +779,6 @@ function validWorkflowSnapshot(workflowId: string) {
     scope_kind: 'city',
     scope_ref: 'test',
     snapshot_version: 1,
-    snapshot_event_seq: null,
     partial: false,
     stores_scanned: [],
     beads: [],

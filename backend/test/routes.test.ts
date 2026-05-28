@@ -73,9 +73,13 @@ function validSession(id: string) {
   return {
     id,
     template: 'codex',
+    title: id,
+    provider: 'codex',
+    session_name: id,
     state: 'running',
     created_at: '2026-01-01T00:00:00.000Z',
     attached: false,
+    running: true,
   };
 }
 
@@ -539,7 +543,7 @@ describe('routes: upstream timeout -> HTTP 504', () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ items: [validSession('td-foo')] }));
+      res.end(JSON.stringify({ items: [validSession('td-foo')], total: 1 }));
     });
     const { app } = buildApp(fake.baseUrl);
     const { url, close } = await startApp(app);
@@ -782,7 +786,7 @@ describe('sessionsRouter timeout bound', () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ items: [validSession('gc-abc')] }));
+      res.end(JSON.stringify({ items: [validSession('gc-abc')], total: 1 }));
     });
     const gc = new GcClient({
       baseUrl: fake.baseUrl,

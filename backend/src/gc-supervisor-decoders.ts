@@ -11,6 +11,10 @@ import type {
   TranscriptTurn,
 } from 'gas-city-dashboard-shared';
 import type { components } from './generated/gc-supervisor.js';
+import {
+  openApiIssuePath,
+  validateGcSupervisorComponent,
+} from './gc-supervisor-schema-validator.js';
 
 type RawSupervisorSchema = components['schemas'];
 
@@ -176,6 +180,7 @@ const HealthSchema = z.object({
 export const gcSupervisorDecoders = {
   listSessions(value: RawSupervisorSchema['ListBodySessionResponse']): GcSessionList {
     return decodeSupervisorPayload(
+      'ListBodySessionResponse',
       z.object({ items: z.array(SessionSchema) }).passthrough(),
       value,
       'listSessions',
@@ -183,11 +188,12 @@ export const gcSupervisorDecoders = {
   },
 
   getBead(value: RawSupervisorSchema['Bead']): GcBead {
-    return decodeSupervisorPayload(BeadSchema, value, 'getBead');
+    return decodeSupervisorPayload(null, BeadSchema, value, 'getBead');
   },
 
   listBeads(value: RawSupervisorSchema['ListBodyBead']): GcBeadList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: z.array(BeadSchema),
         total: z.number().finite().optional(),
@@ -199,6 +205,7 @@ export const gcSupervisorDecoders = {
 
   listMail(value: RawSupervisorSchema['MailListBody']): GcMailList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: z.array(MailItemSchema),
         total: z.number().finite().optional(),
@@ -210,6 +217,7 @@ export const gcSupervisorDecoders = {
 
   listEvents(value: RawSupervisorSchema['ListBodyWireEvent']): GcEventList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: z.array(EventSchema),
         next: z.number().finite().optional(),
@@ -220,32 +228,68 @@ export const gcSupervisorDecoders = {
   },
 
   getWorkflow(value: RawSupervisorSchema['WorkflowSnapshotResponse']): GcWorkflowSnapshot {
-    return decodeSupervisorPayload(WorkflowSnapshotSchema, value, 'getWorkflow');
+    return decodeSupervisorPayload(
+      'WorkflowSnapshotResponse',
+      WorkflowSnapshotSchema,
+      value,
+      'getWorkflow',
+    );
   },
 
   getFormulaDetail(value: RawSupervisorSchema['FormulaDetailResponse']): GcFormulaDetail {
-    return decodeSupervisorPayload(FormulaDetailSchema, value, 'getFormulaDetail');
+    return decodeSupervisorPayload(
+      'FormulaDetailResponse',
+      FormulaDetailSchema,
+      value,
+      'getFormulaDetail',
+    );
   },
 
   fetchTranscript(value: RawSupervisorSchema['SessionTranscriptGetResponse']): GcTranscriptResponse {
-    return decodeSupervisorPayload(TranscriptResponseSchema, value, 'fetchTranscript');
+    return decodeSupervisorPayload(
+      'SessionTranscriptGetResponse',
+      TranscriptResponseSchema,
+      value,
+      'fetchTranscript',
+    );
   },
 
   health(value: RawSupervisorSchema['HealthOutputBody']): SupervisorHealth {
-    return decodeSupervisorPayload(HealthSchema, value, 'health');
+    return decodeSupervisorPayload(
+      'HealthOutputBody',
+      HealthSchema,
+      value,
+      'health',
+    );
   },
 } as const;
 
 function decodeSupervisorPayload<Decoded>(
+  componentName: string | null,
   schema: z.ZodType,
   value: unknown,
   payload: string,
 ): Decoded {
+  if (componentName !== null) {
+    const openApiIssue = validateGcSupervisorComponent(componentName, value);
+    if (openApiIssue !== undefined) {
+      throw invalidOpenApi(payload, openApiIssue);
+    }
+  }
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw invalid(payload, parsed.error);
   }
   return parsed.data as Decoded;
+}
+
+function invalidOpenApi(
+  payload: string,
+  issue: { readonly path: readonly (string | number)[]; readonly expected: string },
+): Error {
+  return new Error(
+    `invalid gc supervisor ${payload} payload: ${openApiIssuePath(issue.path)} must be ${issue.expected}`,
+  );
 }
 
 function invalid(payload: string, error: z.ZodError): Error {

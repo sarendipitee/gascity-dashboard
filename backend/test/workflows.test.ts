@@ -247,7 +247,7 @@ describe('workflows detail route', () => {
       res.setHeader('content-type', 'application/json');
       if (respondMissingFormulaDetail(req, res)) return;
       if (req.url === '/v0/city/racoon-city/sessions') {
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
         return;
       }
       res.end(JSON.stringify(graphV2Snapshot()));
@@ -340,7 +340,7 @@ describe('workflows detail route', () => {
       }
       if (req.url === '/v0/city/racoon-city/sessions') {
         res.setHeader('content-type', 'application/json');
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
         return;
       }
       assert.equal(req.url, '/v0/city/racoon-city/workflow/gc-root?scope_kind=city&scope_ref=racoon-city');
@@ -419,7 +419,7 @@ describe('workflows detail route', () => {
 
     fake.setHandler((req, res) => {
       if (req.url === '/v0/city/racoon-city/sessions') {
-        respondJson(res, { items: [] });
+        respondJson(res, { items: [], total: 0 });
         return;
       }
       if (req.url?.startsWith('/v0/city/racoon-city/bead/')) {
@@ -433,6 +433,11 @@ describe('workflows detail route', () => {
       ) {
         respondJson(res, {
           name: 'mol-demo-plan-review',
+          description: 'Plan demo',
+          version: 'test',
+          var_defs: [],
+          steps: [],
+          deps: [],
           preview: {
             nodes: [
               { id: 'mol-demo-plan-review.inspect', title: 'Inspect scaffold', kind: 'task' },
@@ -492,7 +497,7 @@ describe('workflows detail route', () => {
         return;
       }
       if (req.url === '/v0/city/racoon-city/sessions') {
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
         return;
       }
       res.end(JSON.stringify(staleSnapshot));
@@ -569,6 +574,7 @@ describe('workflows detail route', () => {
             {
               id: 'fddc-g3v',
               template: 'tic-tac-toe-app/codex',
+              provider: 'codex',
               alias: 'tic-tac-toe-app/codex-1',
               title: 'tic-tac-toe-app/codex-1',
               state: 'active',
@@ -583,6 +589,7 @@ describe('workflows detail route', () => {
             {
               id: 'fddc-pe6',
               template: 'tic-tac-toe-app/control-dispatcher',
+              provider: 'claude',
               alias: 'tic-tac-toe-app/control-dispatcher',
               title: 'tic-tac-toe-app/control-dispatcher',
               state: 'active',
@@ -594,6 +601,7 @@ describe('workflows detail route', () => {
               running: true,
             },
           ],
+          total: 2,
         }));
         return;
       }
@@ -657,9 +665,11 @@ describe('workflows detail route', () => {
             {
               id: 'fddc-g3v',
               template: 'tic-tac-toe-app/codex',
+              provider: 'codex',
               alias: 'tic-tac-toe-app/codex-1',
               title: 'tic-tac-toe-app/codex-1',
               state: 'active',
+              session_name: 'tic-tac-toe-app/codex-1',
               created_at: '2026-05-26T02:50:29Z',
               attached: false,
               rig: 'tic-tac-toe-app',
@@ -668,6 +678,7 @@ describe('workflows detail route', () => {
               running: true,
             },
           ],
+          total: 1,
         }));
         return;
       }
@@ -743,7 +754,7 @@ describe('workflows detail route', () => {
       res.setHeader('content-type', 'application/json');
       if (respondMissingFormulaDetail(req, res)) return;
       if (req.url === '/v0/city/racoon-city/sessions') {
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
         return;
       }
       if (req.url?.startsWith('/v0/city/racoon-city/bead/')) {
@@ -789,7 +800,7 @@ describe('workflows detail route', () => {
       res.setHeader('content-type', 'application/json');
       if (respondMissingFormulaDetail(req, res)) return;
       if (req.url === '/v0/city/racoon-city/sessions') {
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
         return;
       }
       if (req.url?.startsWith('/v0/city/racoon-city/bead/')) {
@@ -824,7 +835,7 @@ describe('workflows detail route', () => {
     fake.setHandler((req, res) => {
       res.setHeader('content-type', 'application/json');
       if (req.url === '/v0/city/racoon-city/sessions') {
-        res.end(JSON.stringify({ items: [] }));
+        res.end(JSON.stringify({ items: [], total: 0 }));
         return;
       }
       res.end(JSON.stringify({
