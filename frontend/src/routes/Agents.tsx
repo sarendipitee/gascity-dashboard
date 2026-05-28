@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { GcSession, GcSessionState, TranscriptResult } from 'gas-city-dashboard-shared';
+import type { GcSession, GcSessionState } from 'gas-city-dashboard-shared';
 import { effectiveContextPct } from 'gas-city-dashboard-shared';
-import { api, ApiClientError } from '../api/client';
+import { api } from '../api/client';
 import { Button } from '../components/Button';
 import { FilterChips } from '../components/FilterChips';
 import { GroupedTable } from '../components/GroupedTable';
 import { ListSearchBar } from '../components/ListSearchBar';
 import { Modal } from '../components/Modal';
 import { PageHeader } from '../components/PageHeader';
-import { SessionPeekContent, formatPeekChars } from '../components/SessionPeek';
+import { LiveSessionPeek, isSessionStreamable } from '../components/LiveSessionPeek';
 import { SortToggle } from '../components/SortToggle';
 import { SseIndicator } from '../components/SseIndicator';
 import { StatusBadge, type StatusTone } from '../components/StatusBadge';
@@ -95,10 +95,14 @@ export function AgentsPage() {
   const rows = useMemo(() => data?.items ?? [], [data]);
   const [now, setNow] = useState(() => Date.now());
 
-  const [peekFor, setPeekFor] = useState<GcSession | null>(null);
-  const [peekResult, setPeekResult] = useState<TranscriptResult | null>(null);
-  const [peekLoading, setPeekLoading] = useState(false);
-  const [peekError, setPeekError] = useState<string | null>(null);
+  const [peekId, setPeekId] = useState<string | null>(null);
+  // Derive the peeked session from the live rows by id rather than from a
+  // click-time snapshot, so its streamable state stays current as the
+  // session list refreshes while the modal is open.
+  const peekSession = useMemo(
+    () => (peekId === null ? null : rows.find((s) => s.id === peekId) ?? null),
+    [rows, peekId],
+  );
 
   useEffect(() => {
     const tick = setInterval(() => {
@@ -108,27 +112,6 @@ export function AgentsPage() {
   }, []);
 
   const sseState = useGcEventRefresh(['session.'], () => void refresh());
-
-  const handlePeek = useCallback(async (session: GcSession) => {
-    setPeekFor(session);
-    setPeekResult(null);
-    setPeekError(null);
-    setPeekLoading(true);
-    try {
-      const result = await api.peekSession(session.id);
-      setPeekResult(result);
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError
-          ? `${err.status} ${err.message}`
-          : err instanceof Error
-            ? err.message
-            : 'peek failed';
-      setPeekError(msg);
-    } finally {
-      setPeekLoading(false);
-    }
-  }, []);
 
   const synopsis = useMemo(() => buildSynopsis(rows), [rows]);
 
@@ -258,14 +241,14 @@ export function AgentsPage() {
       key: 'actions',
       label: '',
       render: (r) => (
-        <Button size="sm" tone="quiet" onClick={() => void handlePeek(r)}>
+        <Button size="sm" tone="quiet" onClick={() => setPeekId(r.id)}>
           Peek
         </Button>
       ),
       align: 'right',
       className: 'w-20',
     },
-  ], [handlePeek, now]);
+  ], [now]);
 
   return (
     <section>
@@ -327,30 +310,25 @@ export function AgentsPage() {
       />
 
       <Modal
-        open={peekFor !== null}
-        onClose={() => setPeekFor(null)}
-        title={peekFor ? `${peekFor.alias ?? peekFor.title ?? peekFor.id}` : 'Transcript'}
+        open={peekId !== null}
+        onClose={() => setPeekId(null)}
+        title={
+          peekSession
+            ? `${peekSession.alias ?? peekSession.title ?? peekSession.id}`
+            : (peekId ?? 'Transcript')
+        }
         caption={
-          peekResult
-            ? `${peekResult.turns.length} turn(s), ${formatPeekChars(peekResult.total_chars)}, captured ${formatRelative(peekResult.captured_at, Date.now())}`
-            : "One-shot snapshot from the supervisor's transcript API."
+          isSessionStreamable(peekSession)
+            ? "Live transcript from the supervisor's session stream."
+            : "Snapshot from the supervisor's transcript API."
         }
         widthClass="max-w-5xl"
-        footer={
-          <Button
-            size="sm"
-            tone="quiet"
-            onClick={() => peekFor && void handlePeek(peekFor)}
-            disabled={peekLoading}
-          >
-            Re-fetch
-          </Button>
-        }
       >
-        <SessionPeekContent
-          loading={peekLoading}
-          error={peekError}
-          result={peekResult}
+        <LiveSessionPeek
+          sessionId={peekId}
+          stream={isSessionStreamable(peekSession)}
+          showBadge
+          showCaption
         />
       </Modal>
     </section>

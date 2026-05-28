@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { GcBead, GcMailItem, GcSession, GcSessionState, TranscriptResult } from 'gas-city-dashboard-shared';
+import type { GcBead, GcMailItem, GcSession, GcSessionState } from 'gas-city-dashboard-shared';
 import { effectiveContextPct } from 'gas-city-dashboard-shared';
 import { api, ApiClientError } from '../api/client';
 import { BeadDetailModal } from '../components/BeadDetailModal';
 import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
-import { SessionPeekContent, formatPeekChars } from '../components/SessionPeek';
+import { LiveSessionPeek, isSessionStreamable } from '../components/LiveSessionPeek';
 import { StatusBadge, type StatusTone } from '../components/StatusBadge';
+import { RelatedEntities } from '../components/RelatedEntities';
 import { useViewingAs } from '../contexts/ViewingAsContext';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import { useEntityLinks } from '../hooks/useEntityLinks';
 import { formatRelative } from '../hooks/time';
 
 // Read-only drilldown for a single agent. Route: /agents/:slug where
@@ -19,13 +21,12 @@ import { formatRelative } from '../hooks/time';
 //   - Header with state badge, identity line, back link
 //   - Metadata block (rig, pool, template, model, ctx, attached, timestamps)
 //   - Beads assigned to this agent (filtered from /api/beads)
-//   - Live peek panel (auto-refresh, visibility-gated, abort-guarded)
+//   - Live peek panel (live SSE stream for active sessions; snapshot otherwise)
 //
 // Deferred (read-only scope): nudge button, directives panel. Send half
 // of the chat thread (compose form) is filed separately. Directives
 // needs a new backend endpoint.
 
-const PEEK_AUTO_REFRESH_MS = 7_000;
 const SESSIONS_REFRESH_MS = 15_000;
 const BEADS_REFRESH_MS = 30_000;
 const CHAT_REFRESH_MS = 10_000;
@@ -42,11 +43,8 @@ export function AgentDetailPage() {
   const [beads, setBeads] = useState<GcBead[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [viewingBead, setViewingBead] = useState<GcBead | null>(null);
+  const [viewingBeadId, setViewingBeadId] = useState<string | null>(null);
 
-  const [peekResult, setPeekResult] = useState<TranscriptResult | null>(null);
-  const [peekFetchedAt, setPeekFetchedAt] = useState<number | null>(null);
-  const [peekLoading, setPeekLoading] = useState(false);
-  const [peekError, setPeekError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const [chatItems, setChatItems] = useState<GcMailItem[] | null>(null);
@@ -161,36 +159,6 @@ export function AgentDetailPage() {
     });
   }, [session, beads]);
 
-  const refreshPeek = useCallback(async () => {
-    if (session === null) return;
-    setPeekLoading(true);
-    setPeekError(null);
-    try {
-      const result = await api.peekSession(session.id);
-      setPeekResult(result);
-      setPeekFetchedAt(Date.now());
-    } catch (err) {
-      const msg =
-        err instanceof ApiClientError
-          ? `${err.status} ${err.message}`
-          : err instanceof Error
-            ? err.message
-            : 'peek failed';
-      setPeekError(msg);
-    } finally {
-      setPeekLoading(false);
-    }
-  }, [session]);
-
-  useEffect(() => {
-    if (session === null) return;
-    void refreshPeek();
-    const tick = setInterval(() => {
-      if (!document.hidden) void refreshPeek();
-    }, PEEK_AUTO_REFRESH_MS);
-    return () => clearInterval(tick);
-  }, [session, refreshPeek]);
-
   // Chat thread: wide /api/mail box=all fetch, client-side filter for
   // messages between operator and this agent. AbortController guard per
   // tick prevents a stale response overwriting a fresher one — fetch
@@ -299,6 +267,12 @@ export function AgentDetailPage() {
     void refreshDirectives();
   }, [primeAlias, directivesAliasFetched, refreshDirectives]);
 
+  // Related entities (gascity-dashboard-j4x). Focus on the session id so
+  // the index surfaces the beads, workflow runs, and PRs adjacent to this
+  // agent's work. Hook is called unconditionally (before the early
+  // returns) per rules-of-hooks; a null ref leaves it idle.
+  const links = useEntityLinks(session?.id ?? null);
+
   const chatMessages = useMemo<ReadonlyArray<GcMailItem>>(() => {
     if (chatItems === null) return [];
     const agents = new Set(agentAliases);
@@ -358,6 +332,15 @@ export function AgentDetailPage() {
   const label = session.alias ?? session.title ?? session.id;
   const tone = stateTone(session.state);
 
+  const openBead = (id: string) => {
+    setViewingBead(null);
+    setViewingBeadId(id);
+  };
+  const closeBead = () => {
+    setViewingBead(null);
+    setViewingBeadId(null);
+  };
+
   return (
     <section>
       <PageHeader
@@ -402,17 +385,33 @@ export function AgentDetailPage() {
       <BeadsAssigned
         beads={assignedBeads}
         loading={beads === null}
-        onSelect={setViewingBead}
+        onSelect={(b) => {
+          setViewingBeadId(null);
+          setViewingBead(b);
+        }}
       />
 
-      <LivePeek
-        result={peekResult}
-        loading={peekLoading}
-        error={peekError}
-        fetchedAt={peekFetchedAt}
+      <RelatedEntities
+        view={links.view}
+        loading={links.loading}
+        error={links.error}
         now={now}
-        onRefresh={() => void refreshPeek()}
+        onOpenBead={openBead}
       />
+
+      <section>
+        <header className="flex items-baseline justify-between mb-4">
+          <h2 className="text-label uppercase tracking-wider text-fg-faint">
+            Live peek
+          </h2>
+        </header>
+        <LiveSessionPeek
+          sessionId={session.id}
+          stream={isSessionStreamable(session)}
+          showBadge
+          showCaption
+        />
+      </section>
 
       {primeAlias !== null && (
         <Directives
@@ -432,10 +431,11 @@ export function AgentDetailPage() {
       />
 
       <BeadDetailModal
-        open={viewingBead !== null}
-        onClose={() => setViewingBead(null)}
-        beadId={viewingBead?.id ?? null}
+        open={viewingBead !== null || viewingBeadId !== null}
+        onClose={closeBead}
+        beadId={viewingBead?.id ?? viewingBeadId}
         initialBead={viewingBead}
+        onOpenBead={openBead}
       />
     </section>
   );
@@ -533,50 +533,6 @@ function BeadsAssigned({
           ))}
         </ul>
       )}
-    </section>
-  );
-}
-
-function LivePeek({
-  result,
-  loading,
-  error,
-  fetchedAt,
-  now,
-  onRefresh,
-}: {
-  result: TranscriptResult | null;
-  loading: boolean;
-  error: string | null;
-  fetchedAt: number | null;
-  now: number;
-  onRefresh: () => void;
-}) {
-  const captionParts: string[] = [];
-  if (result) {
-    captionParts.push(`${result.turns.length} turn(s)`);
-    captionParts.push(formatPeekChars(result.total_chars));
-    captionParts.push(`captured ${formatRelative(result.captured_at, now)}`);
-  }
-  if (fetchedAt !== null) {
-    captionParts.push(`refreshed ${formatRelative(new Date(fetchedAt).toISOString(), now)}`);
-  }
-  captionParts.push(`auto-refresh ${PEEK_AUTO_REFRESH_MS / 1_000}s`);
-
-  return (
-    <section>
-      <header className="flex items-baseline justify-between mb-4">
-        <h2 className="text-label uppercase tracking-wider text-fg-faint">
-          Live peek
-        </h2>
-        <Button size="sm" tone="quiet" onClick={onRefresh} disabled={loading}>
-          {loading ? 'Refreshing' : 'Refresh'}
-        </Button>
-      </header>
-      <p className="text-label uppercase tracking-wider text-fg-faint mb-4 tnum">
-        {captionParts.join(' · ')}
-      </p>
-      <SessionPeekContent loading={loading} error={error} result={result} />
     </section>
   );
 }

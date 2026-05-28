@@ -250,3 +250,69 @@ describe('MaintainerPage — dual-intent dispatch contract (gascity-dashboard-pp
     expect(normalised).toMatch(/^Slung 1 to draft agent\./);
   });
 });
+
+// gascity-dashboard-2yr: end-to-end pin that MaintainerPage wires
+// `data.slung_section` into the <SlungSection> group. The component-level
+// tests in Maintainer.test.tsx render SlungSection in isolation; this
+// confirms the page actually passes the envelope's slung_section through
+// and that the lifted item appears in the in-flight group rather than the
+// backlog tier. Failure mode caught: a refactor that drops the
+// slung_section render branch or feeds it the wrong field.
+describe('MaintainerPage — slung section wiring (gascity-dashboard-2yr)', () => {
+  it('renders the "Slung · awaiting agent" group with the lifted item from data.slung_section', async () => {
+    const env = syntheticEnvelope();
+    // This test pins ONLY the slung_section → <SlungSection> wiring on
+    // MaintainerPage. The actual lift-out-of-tier behaviour (the backend
+    // overlay removing the item from its tier) is covered by the backend
+    // overlay tests; here the slung PR (7700) is simply placed directly in
+    // slung_section — it is intentionally NOT in env.tiers, mirroring what
+    // the wire looks like AFTER the backend has already lifted it.
+    env.slung_section = [
+      {
+        kind: 'pr',
+        number: 7700,
+        title: 'slung fixture PR awaiting the triage agent',
+        status: 'open',
+        author: {
+          login: 'fixture-bot',
+          tier: 'trusted',
+          issues_accepted: 0,
+          issues_opened: 0,
+          prs_merged: 0,
+          prs_opened: 1,
+          computed_at: '2026-05-24T00:00:00.000Z',
+        },
+        created_at: '2026-05-23T00:00:00.000Z',
+        updated_at: '2026-05-24T00:00:00.000Z',
+        labels: ['kind/bug'],
+        tier: 'regression_breaking',
+        triage_score: 300,
+        triage_assessment: null,
+        slung: {
+          slung_at: '2026-05-26T10:30:00Z',
+          target: 'chief-of-staff',
+          bead_id: 'gc-7700',
+          resolved_session_name: 'oversight-rig__chief-of-staff',
+        },
+        cluster_id: null,
+        blast_files: [],
+        lines_changed: 50,
+        weak_ties: [],
+        linked_numbers: [],
+        html_url: 'https://github.com/gastownhall/gascity/pull/7700',
+        is_marked: false,
+        has_in_flight_pr: false,
+      },
+    ];
+    mockTriage.mockResolvedValue(env);
+    mount();
+
+    // The section header renders, and the lifted item's drill-in link is
+    // present (proving RowList → SlungLink fired for the section).
+    await screen.findByRole('button', { name: /slung/i });
+    const link = await screen.findByRole('link', {
+      name: /slung to chief-of-staff/i,
+    });
+    expect(link.getAttribute('href')).toBe('/agents/oversight-rig__chief-of-staff');
+  });
+});

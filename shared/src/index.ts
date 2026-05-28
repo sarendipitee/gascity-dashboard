@@ -14,6 +14,7 @@ export {
 } from './session-resolve.js';
 export * from './workflow-detail.js';
 export type * from './workflow-snapshot.js';
+export * from './links.js';
 
 export type IsoTimestamp = string;
 export type BeadId = string;
@@ -223,6 +224,88 @@ export type BeadAction = 'claim' | 'close' | 'nudge';
 export interface BeadActionRequest {
   /** Optional reason / note attached to the action. */
   reason?: string;
+}
+
+// ── Supervisor write wire-shapes (gascity-dashboard-mq2) ─────────────────
+// Request/response bodies for the supervisor's HTTP write endpoints the
+// dashboard adopts in place of `gc` CLI subprocesses. These are the
+// supervisor↔backend contract (mirroring SlingInputBody / SlingResponse in
+// the supervisor's OpenAPI), distinct from the browser↔backend shapes; the
+// GcClient is the only consumer.
+
+/**
+ * Body for `POST /v0/city/{city}/sling`. Only `target` is required
+ * upstream; `bead` carries the free-text bead body (what the `gc sling
+ * <target> <text>` CLI passed positionally). The formula/scope fields are
+ * part of the upstream schema but unused by v1 text-only slings — kept off
+ * this type until the formula-driven follow-up (bead 6fp) needs them.
+ */
+export interface SlingInput {
+  target: string;
+  /** Free-text bead body. */
+  bead?: string;
+}
+
+/**
+ * Response from `POST /v0/city/{city}/sling`. `root_bead_id` is the routed
+ * bead the dashboard records in slung-state (replaces the `^Slung <id>`
+ * stdout parse). Other fields are surfaced by the supervisor but unused
+ * here; typed optional so a schema addition upstream doesn't break parsing.
+ */
+export interface SlingResponse {
+  root_bead_id?: string;
+  bead?: string;
+  workflow_id?: string;
+  target?: string;
+  status?: string;
+}
+
+/**
+ * Body for `PATCH /v0/city/{city}/bead/{id}` (gascity-dashboard-mq2;
+ * replaces the `gc bd update` CLI subprocess on the bead-CLAIM path). Mirrors
+ * the supervisor's `BeadUpdateBody` schema. The dashboard's claim action sets
+ * `status: 'in_progress'` + `assignee: 'stephanie'`; the rest of the upstream
+ * schema (title/description/labels/priority/…) is unused by the dashboard and
+ * left off this type until a use case needs it. NOTE: bead CLOSE deliberately
+ * stays on the CLI — the supervisor's `/bead/{id}/close` endpoint has no reason
+ * field and the dashboard's close-reason UI would silently lose it.
+ */
+export interface BeadUpdateInput {
+  status?: BeadStatus;
+  assignee?: string;
+}
+
+/**
+ * Body for `POST /v0/city/{city}/mail` (gascity-dashboard-mq2; replaces the
+ * `gc mail send` CLI subprocess). Mirrors the supervisor's `MailSendInputBody`.
+ * The server pins `from: 'human'` (gc's canonical operator identity); the
+ * browser-facing shape (`MailComposeRequest`) has no `from` slot, so there is
+ * no path to send-as-someone-else. `to`/`subject` are required upstream.
+ */
+export interface MailSendInput {
+  to: string;
+  subject: string;
+  body: string;
+  from: string;
+  rig?: string;
+}
+
+/**
+ * Response from `POST /v0/city/{city}/mail` (the supervisor's `Message`
+ * schema; returns 201). Only `id` is consumed by the dashboard (surfaced as
+ * `message_id` on the browser-facing `MailSendResult`); the rest is typed
+ * optional so a schema addition upstream doesn't break parsing.
+ */
+export interface MailSendResponse {
+  id: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  body?: string;
+  created_at?: IsoTimestamp;
+  read?: boolean;
+  thread_id?: string;
+  rig?: string;
 }
 
 // ── Mail (Phase B but type-locked now so Phase A frontend compiles) ──────
@@ -608,6 +691,26 @@ export interface MaintainerTriage {
   repo: string;
   /** Top-level tiers in fixed order: regression_breaking, regression, stability. */
   tiers: TriageTierSection[];
+  /**
+   * Items currently slung to a triage agent and not yet vetted
+   * (gascity-dashboard-2yr). The serve-time slung overlay LIFTS these out
+   * of `tiers` so the operator sees in-flight work as one dedicated group
+   * rather than inline `slung →` markers scattered across tier rows.
+   *
+   * Every item here carries non-null `slung`. Sorted by `slung.slung_at`
+   * descending so the most-recent batch surfaces on top. Empty when
+   * nothing is in flight.
+   *
+   * Lifecycle: an item is `awaiting` (in a tier) → `slung` (here) →
+   * `vetted` (back in its tier; the overlay forces `slung=null` once
+   * `triage_assessment` lands, so it leaves this section). Because slung
+   * items are removed from `tiers`, the per-tier vetted/awaiting tally and
+   * item counts naturally exclude them.
+   *
+   * Optional so envelopes and fixtures predating this field still
+   * typecheck; readers MUST treat `undefined` as an empty section.
+   */
+  slung_section?: TriageItem[];
   totals: {
     issues_open: number;
     prs_open: number;

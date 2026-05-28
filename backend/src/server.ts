@@ -17,6 +17,7 @@ import { sessionStreamRouter } from './routes/session-stream.js';
 import { agentsRouter } from './routes/agents.js';
 import { beadsRouter } from './routes/beads.js';
 import { workflowsRouter } from './routes/workflows.js';
+import { linksRouter } from './routes/links.js';
 import { mailRouter } from './routes/mail.js';
 import { mailSendRouter } from './routes/mail-send.js';
 import { gitRouter } from './routes/git.js';
@@ -83,13 +84,28 @@ function main(): void {
   });
   writeRouter.use('/sessions', sessionsRouter(gc));
   writeRouter.use('/workflows', workflowsRouter(gc, { rigRoot: config.cityPath }));
+  // Bead-ID cross-entity linked view (gascity-dashboard-j4x). GET-only
+  // reads; the relation index is rebuilt per request from the bead set +
+  // session list (per-snapshot rebuild — no persisted graph to invalidate).
+  writeRouter.use('/links', linksRouter(gc));
   writeRouter.use('/agents', agentsRouter(config.cityPath));
   writeRouter.use('/beads', beadsRouter(gc, config.cityPath));
   writeRouter.use('/mail', mailRouter(gc));
   // mail-send is a SEPARATE router mounted at its own path. The handler in
   // mail-send.ts has no `viewing-as` parameter — physical separation per
   // architect th-1i30ih §"Identity-switching for mail".
-  writeRouter.use('/mail-send', mailSendRouter());
+  // gascity-dashboard-mq2: send over HTTP via the supervisor's POST /mail
+  // endpoint instead of the gc CLI subprocess. The city is in the request
+  // URL path (no --city threading). `from:'human'` is pinned HERE — the
+  // closure's only request-derived inputs are to/subject/body, so the
+  // browser has no path to send-as-someone-else.
+  writeRouter.use(
+    '/mail-send',
+    mailSendRouter({
+      sendMail: (to, subject, body) =>
+        gc.sendMail({ to, subject, body, from: 'human' }),
+    }),
+  );
   // Phase C: Activity + Health surface.
   writeRouter.use('/git', gitRouter());
   writeRouter.use('/builds', buildsRouter());
@@ -111,7 +127,10 @@ function main(): void {
       slungStatePath: maintainerSlungStatePath,
       slingTarget: config.maintainerSlingTarget,
       triageTarget: config.maintainerTriageTarget,
-      cityPath: config.cityPath,
+      // gascity-dashboard-mq2: sling over HTTP via the supervisor's
+      // POST /sling endpoint instead of the gc CLI subprocess. The city is
+      // in the request URL path, so no --city threading is needed.
+      sling: (input) => gc.sling(input),
       // gascity-dashboard-55b: resolve sling target role to a concrete
       // supervisor session at write time so the inline 'slung →' link
       // lands on a real /agents/<session_name> route. Wrapped in a 3s

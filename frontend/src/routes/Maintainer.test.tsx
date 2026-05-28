@@ -1,7 +1,8 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
-import { SelectionActionBar, SlungLink, TriageScore } from './Maintainer';
+import type { TriageItem } from 'gas-city-dashboard-shared';
+import { SelectionActionBar, SlungLink, SlungSection, TriageScore } from './Maintainer';
 
 // gascity-dashboard-5ly: render-level assertions for the bulk action bar.
 // The success-state lifecycle (timer cleanup, back-to-back slings) is
@@ -425,5 +426,113 @@ describe('SelectionActionBar — dual-intent buttons', () => {
     expect(screen.getByRole('button', { name: /sending/i })).toBeTruthy();
     // The triage button keeps its static label.
     expect(screen.getByRole('button', { name: /send to triage agent/i })).toBeTruthy();
+  });
+});
+
+// gascity-dashboard-2yr: the in-flight "Slung · awaiting agent" section.
+// Items lifted out of the backlog tiers by the backend overlay render
+// here as a read-only group with drill-in links and no selection
+// checkboxes.
+function mkSlungItem(
+  overrides: Partial<TriageItem> & { kind: 'pr' | 'issue'; number: number },
+): TriageItem {
+  return {
+    kind: overrides.kind,
+    number: overrides.number,
+    title: overrides.title ?? `Item ${overrides.number}`,
+    html_url:
+      overrides.html_url ??
+      `https://github.com/gastownhall/gascity/${overrides.kind === 'pr' ? 'pull' : 'issues'}/${overrides.number}`,
+    labels: overrides.labels ?? [],
+    status: overrides.status ?? 'open',
+    author: overrides.author ?? {
+      login: 'someone',
+      tier: 'regular',
+      issues_opened: null,
+      issues_accepted: null,
+      prs_opened: null,
+      prs_merged: null,
+      computed_at: null,
+    },
+    tier: overrides.tier ?? 'regression_breaking',
+    triage_score: overrides.triage_score ?? null,
+    triage_assessment: overrides.triage_assessment ?? null,
+    slung: overrides.slung ?? {
+      slung_at: '2026-05-24T00:00:00Z',
+      target: 'chief-of-staff',
+      bead_id: 'gc-1',
+      resolved_session_name: 'oversight-rig__chief-of-staff',
+    },
+    cluster_id: overrides.cluster_id ?? null,
+    blast_files: overrides.blast_files ?? [],
+    lines_changed: overrides.lines_changed ?? null,
+    is_marked: overrides.is_marked ?? false,
+    has_in_flight_pr: overrides.has_in_flight_pr ?? false,
+    linked_numbers: overrides.linked_numbers ?? [],
+    weak_ties: overrides.weak_ties ?? [],
+    created_at: overrides.created_at ?? '2026-05-20T00:00:00Z',
+    updated_at: overrides.updated_at ?? '2026-05-22T00:00:00Z',
+  };
+}
+
+function renderSlungSection(
+  props: Partial<React.ComponentProps<typeof SlungSection>> = {},
+) {
+  return render(
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
+      <SlungSection
+        items={props.items ?? [mkSlungItem({ kind: 'pr', number: 47 })]}
+        collapsed={props.collapsed ?? false}
+        onToggle={props.onToggle ?? (() => {})}
+      />
+    </MemoryRouter>,
+  );
+}
+
+describe('SlungSection — in-flight slung items', () => {
+  afterEach(cleanup);
+
+  it('renders the header with a pluralised item count', () => {
+    renderSlungSection({
+      items: [
+        mkSlungItem({ kind: 'pr', number: 47 }),
+        mkSlungItem({ kind: 'pr', number: 48 }),
+      ],
+    });
+    const header = screen.getByRole('button', { name: /slung/i });
+    const text = header.textContent?.replace(/\s+/g, ' ') ?? '';
+    expect(text).toMatch(/Slung · awaiting agent/);
+    expect(text).toMatch(/2 items/);
+  });
+
+  it("uses singular 'item' for a single slung row", () => {
+    renderSlungSection({ items: [mkSlungItem({ kind: 'pr', number: 47 })] });
+    const header = screen.getByRole('button', { name: /slung/i });
+    expect(header.textContent?.replace(/\s+/g, ' ')).toMatch(/1 item(?!s)/);
+  });
+
+  it('renders a drill-in link for an item with a resolved session', () => {
+    renderSlungSection({ items: [mkSlungItem({ kind: 'pr', number: 47 })] });
+    const link = screen.getByRole('link', { name: /slung to chief-of-staff/i });
+    expect(link.getAttribute('href')).toBe('/agents/oversight-rig__chief-of-staff');
+  });
+
+  it('is read-only: no selection checkboxes in the section', () => {
+    renderSlungSection({
+      items: [
+        mkSlungItem({ kind: 'pr', number: 47 }),
+        mkSlungItem({ kind: 'issue', number: 48 }),
+      ],
+    });
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('hides the rows when collapsed but keeps the header', () => {
+    renderSlungSection({
+      collapsed: true,
+      items: [mkSlungItem({ kind: 'pr', number: 47 })],
+    });
+    expect(screen.getByRole('button', { name: /slung/i })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /slung to/i })).toBeNull();
   });
 });
