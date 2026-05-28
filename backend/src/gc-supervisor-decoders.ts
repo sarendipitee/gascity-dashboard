@@ -14,6 +14,13 @@ import type { components } from './generated/gc-supervisor.js';
 
 type RawSupervisorSchema = components['schemas'];
 
+/**
+ * Decoder-edge type for the supervisor's session-transcript response.
+ * Intentionally local to the backend — this is the raw decoded shape,
+ * NOT a wire-shape that crosses the dashboard's own API boundary. It is
+ * assembled into the public `TranscriptResult` (from shared/) by
+ * `buildTranscriptResult()` in routes/sessions.ts. Do not move to shared/.
+ */
 export interface GcTranscriptResponse {
   id?: string;
   template?: string;

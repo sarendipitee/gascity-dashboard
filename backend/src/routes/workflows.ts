@@ -14,7 +14,7 @@ import { meta, nonEmpty } from '../workflows/bead-fields.js';
 import { enrichWorkflowRun, UnsupportedWorkflowError } from '../workflows/enrich.js';
 import { readWorkflowGitDiff } from '../workflows/diff.js';
 import { mergeWorkflowRuntimeState } from '../workflows/runtime-state.js';
-import { LOG_COMPONENT, errorMessage, logWarn } from '../logging.js';
+import { LOG_COMPONENT, errorMessage, logWarn, sanitizeForLog } from '../logging.js';
 import {
   routeUpstreamError,
   routeValidationError,
@@ -116,9 +116,12 @@ async function getWorkflowSessions(
     // (one backend down, items=null on the wire) reaches the operator.
     const partial = list.partial === true || (list.partial_errors?.length ?? 0) > 0;
     if (partial) {
+      const detail = list.partial_errors && list.partial_errors.length > 0
+        ? list.partial_errors.map(sanitizeForLog).join(', ')
+        : 'no detail';
       logWarn(
         LOG_COMPONENT.workflows,
-        `supervisor reported partial session list (${list.partial_errors?.join(', ') ?? 'no detail'}); serving partial`,
+        `supervisor reported partial session list (${detail}); serving partial`,
       );
     }
     return { sessions: list.items, partial };

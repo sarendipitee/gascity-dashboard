@@ -561,6 +561,61 @@ describe('GcClient error handling', () => {
     );
   });
 
+  // The four list decoders share `listItemsField` — but exercise each
+  // wrapper independently so a future regression in listSessions / listMail
+  // / listEvents (e.g. someone wires up a permissive override) is caught
+  // by its own test instead of relying on listBeads as a proxy.
+  test('F3: listSessions with non-array items still rejects', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: 'not-an-array' }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listSessions(),
+      /invalid gc supervisor listSessions payload/i,
+    );
+  });
+
+  test('F3: listMail with non-array items still rejects', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: { not: 'array' } }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listMail(),
+      /invalid gc supervisor listMail payload/i,
+    );
+  });
+
+  test('F3: listEvents with non-array items still rejects', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: 7 }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listEvents(),
+      /invalid gc supervisor listEvents payload/i,
+    );
+  });
+
   test('F2: fetchTranscript with turns=null normalizes to [] (raw format degradation)', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;

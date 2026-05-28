@@ -5,7 +5,7 @@ import { parseRef } from '../links/node-ref.js';
 import { buildRelationIndex } from '../links/relation-index.js';
 import { buildLinkView } from '../links/build-link-view.js';
 import { ResolutionRollup } from '../links/instrumentation.js';
-import { LOG_COMPONENT, errorMessage, logWarn } from '../logging.js';
+import { LOG_COMPONENT, errorMessage, logWarn, sanitizeForLog } from '../logging.js';
 import { routeUpstreamError, writeRouteError } from '../route-errors.js';
 
 // GET /api/links/:ref — bead-ID cross-entity linked view (gascity-dashboard-j4x).
@@ -118,7 +118,7 @@ async function fetchSources(gc: GcClient): Promise<Sources> {
   if (beadList.partial === true || (beadList.partial_errors?.length ?? 0) > 0) {
     logWarn(
       LOG_COMPONENT.links,
-      `supervisor reported partial bead list (${beadList.partial_errors?.join(', ') ?? 'no detail'}); serving partial`,
+      `supervisor reported partial bead list (${formatPartialErrors(beadList.partial_errors)}); serving partial`,
     );
     partial = true;
   }
@@ -129,7 +129,7 @@ async function fetchSources(gc: GcClient): Promise<Sources> {
     if (sessionList.partial === true || (sessionList.partial_errors?.length ?? 0) > 0) {
       logWarn(
         LOG_COMPONENT.links,
-        `supervisor reported partial session list (${sessionList.partial_errors?.join(', ') ?? 'no detail'}); serving partial`,
+        `supervisor reported partial session list (${formatPartialErrors(sessionList.partial_errors)}); serving partial`,
       );
       partial = true;
     }
@@ -138,4 +138,16 @@ async function fetchSources(gc: GcClient): Promise<Sources> {
     partial = true;
   }
   return { beads, sessions, partial, supervisorFetchedAt };
+}
+
+/**
+ * Format supervisor-reported `partial_errors` for an operator log line.
+ * Each entry is newline-sanitized before joining so a hostile or
+ * misbehaving supervisor can't inject forged `[component] message`
+ * lines into the operator's terminal. Returns `'no detail'` when the
+ * array is absent or empty.
+ */
+function formatPartialErrors(errors: readonly string[] | undefined): string {
+  if (!errors || errors.length === 0) return 'no detail';
+  return errors.map(sanitizeForLog).join(', ');
 }
