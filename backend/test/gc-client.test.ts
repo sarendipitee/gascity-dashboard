@@ -454,9 +454,10 @@ describe('GcClient error handling', () => {
     });
     const out = await gc.listBeads(undefined, { limit: 10 });
     assert.equal(out.items.length, 1);
-    // Zod `.nullish()` on an omitted field yields undefined; assert the
-    // decoder didn't reject and the field is absent.
-    assert.equal(out.items[0]?.priority, undefined);
+    // The decoder collapses omitted/undefined priority to `null` so the
+    // typed interior (`GcBead.priority: number | null`) is never violated
+    // at runtime — keeps `=== null` checks in the frontend reliable.
+    assert.equal(out.items[0]?.priority, null);
   });
 
   test('rejects malformed mail list payloads at the supervisor boundary', async () => {
