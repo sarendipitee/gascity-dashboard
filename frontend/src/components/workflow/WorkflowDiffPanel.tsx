@@ -85,8 +85,12 @@ function diffLineClass(line: string): string {
   if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff --git')) {
     return 'diff-line-file text-fg';
   }
-  if (line.startsWith('@@')) return 'diff-line-hunk text-warn';
-  if (line.startsWith('+')) return 'diff-line-add text-ok';
+  // Diff lines are body type; the +/-/@@ glyph carries the state (Greyscale
+  // Test), so they stay neutral. Coloring them — maroon worst of all — would
+  // breach the One Mark Rule and put accent on body type (DESIGN.md §2).
+  // gascity-dashboard-rl5y.
+  if (line.startsWith('@@')) return 'diff-line-hunk text-fg-faint';
+  if (line.startsWith('+')) return 'diff-line-add text-fg';
   if (line.startsWith('-')) return 'diff-line-remove text-fg-muted';
   return 'diff-line-context text-fg-muted';
 }
