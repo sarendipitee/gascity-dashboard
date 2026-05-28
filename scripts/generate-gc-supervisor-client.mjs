@@ -14,8 +14,12 @@ const header = [
   '',
 ].join('\n');
 const runtimeSchemaRoots = [
+  'Bead',
   'FormulaDetailResponse',
   'HealthOutputBody',
+  'ListBodyBead',
+  'ListBodyWireEvent',
+  'MailListBody',
   'ListBodySessionResponse',
   'SessionTranscriptGetResponse',
   'WorkflowSnapshotResponse',
@@ -44,6 +48,7 @@ async function generateRuntimeSchemas(toPath) {
   if (!isRecord(allSchemas)) {
     throw new Error('OpenAPI schema is missing components.schemas');
   }
+  applyRuntimeSchemaOverlays(allSchemas);
   const names = collectSchemaClosure(allSchemas, runtimeSchemaRoots);
   const selected = Object.fromEntries(
     names.map((name) => [name, normalizeJson(allSchemas[name])]),
@@ -135,6 +140,20 @@ function componentNameFromRef(ref) {
     throw new Error(`unsupported OpenAPI ref ${ref}`);
   }
   return ref.slice(prefix.length);
+}
+
+function applyRuntimeSchemaOverlays(allSchemas) {
+  // Observed supervisor wire drift: non-engineering beads can carry
+  // priority:null while the current OpenAPI component says integer-only.
+  // Keep the generated validator strict everywhere else, and remove this
+  // overlay once the upstream schema marks priority nullable.
+  const bead = allSchemas.Bead;
+  if (!isRecord(bead)) return;
+  const properties = bead.properties;
+  if (!isRecord(properties)) return;
+  const priority = properties.priority;
+  if (!isRecord(priority)) return;
+  priority.type = ['integer', 'null'];
 }
 
 function normalizeJson(value) {

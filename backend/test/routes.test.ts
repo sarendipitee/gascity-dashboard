@@ -480,7 +480,7 @@ describe('routes: upstream timeout -> HTTP 504', () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ items: corpus }));
+      res.end(JSON.stringify({ items: corpus, total: corpus.length }));
     });
     const { app } = buildApp(fake.baseUrl);
     const { url, close } = await startApp(app);

@@ -434,6 +434,38 @@ describe('GcClient error handling', () => {
     );
   });
 
+  test('rejects bead lists that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [validBead('td-abc')] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listBeads(undefined, { limit: 10 }),
+      /invalid gc supervisor listBeads payload: payload\.total must be present/i,
+    );
+  });
+
+  test('accepts nullable bead priority through the generated schema overlay', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ ...validBead('td-null-priority'), priority: null }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    const bead = await gc.getBead('td-null-priority');
+    assert.equal(bead.priority, null);
+  });
+
   test('rejects malformed mail list payloads at the supervisor boundary', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
@@ -451,6 +483,23 @@ describe('GcClient error handling', () => {
     );
   });
 
+  test('rejects mail lists that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [validMail('mail-1')] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listMail(),
+      /invalid gc supervisor listMail payload: payload\.total must be present/i,
+    );
+  });
+
   test('rejects malformed event list payloads at the supervisor boundary', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
@@ -465,6 +514,23 @@ describe('GcClient error handling', () => {
     await assert.rejects(
       () => gc.listEvents(),
       /invalid gc supervisor listEvents payload/i,
+    );
+  });
+
+  test('rejects event lists that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listEvents(),
+      /invalid gc supervisor listEvents payload: payload\.total must be present/i,
     );
   });
 
@@ -767,6 +833,18 @@ function validBead(id: string) {
     issue_type: 'task',
     priority: 0,
     created_at: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+function validMail(id: string) {
+  return {
+    id,
+    from: 'stephanie',
+    to: 'agent',
+    subject: id,
+    body: 'body',
+    created_at: '2026-01-01T00:00:00.000Z',
+    read: false,
   };
 }
 

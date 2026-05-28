@@ -188,12 +188,12 @@ export const gcSupervisorDecoders = {
   },
 
   getBead(value: RawSupervisorSchema['Bead']): GcBead {
-    return decodeSupervisorPayload(null, BeadSchema, value, 'getBead');
+    return decodeSupervisorPayload('Bead', BeadSchema, value, 'getBead');
   },
 
   listBeads(value: RawSupervisorSchema['ListBodyBead']): GcBeadList {
     return decodeSupervisorPayload(
-      null,
+      'ListBodyBead',
       z.object({
         items: z.array(BeadSchema),
         total: z.number().finite().optional(),
@@ -205,7 +205,7 @@ export const gcSupervisorDecoders = {
 
   listMail(value: RawSupervisorSchema['MailListBody']): GcMailList {
     return decodeSupervisorPayload(
-      null,
+      'MailListBody',
       z.object({
         items: z.array(MailItemSchema),
         total: z.number().finite().optional(),
@@ -217,7 +217,7 @@ export const gcSupervisorDecoders = {
 
   listEvents(value: RawSupervisorSchema['ListBodyWireEvent']): GcEventList {
     return decodeSupervisorPayload(
-      null,
+      'ListBodyWireEvent',
       z.object({
         items: z.array(EventSchema),
         next: z.number().finite().optional(),

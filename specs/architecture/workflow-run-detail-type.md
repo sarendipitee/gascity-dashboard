@@ -297,6 +297,9 @@ Implemented:
 - generated OpenAPI runtime validation for the supervisor payloads that feed
   workflow detail projection: session lists, workflow snapshots, formula
   details, transcripts, and health
+- generated OpenAPI runtime validation for bead, bead-list, mail-list, and
+  event-list payloads, with an explicit generated-schema overlay for the
+  observed nullable `Bead.priority` supervisor drift
 - centralized client-error reporting for workflow detail load failures, diff
   failures, malformed city event payloads, and malformed selected-session
   stream events
@@ -316,11 +319,6 @@ Partially implemented:
 
 Not implemented:
 
-- Generated OpenAPI runtime validation across every non-workflow supervisor
-  payload. The remaining bead, mail, and event decoders stay handwritten until
-  known supervisor OpenAPI/wire-shape drift, such as nullable bead priority, is
-  resolved in the upstream schema or captured as an explicit generated-schema
-  overlay.
 - Incremental event application to the run projection. This is intentionally
   not a goal until the backend can own the event reducer.
 - Durable analytics or metrics beyond the existing centralized client-error
@@ -405,8 +403,7 @@ stable backend boundaries:
 
 1. Capture real graph.v2 supervisor snapshots for completed, running, blocked,
    retried, and looped runs; use them as backend enrichment fixtures.
-2. Replace handwritten supervisor runtime decoders with schema-derived
-   validation for the remaining non-workflow payloads once the upstream schema
-   matches the observed wire shape.
+2. Remove the generated-schema `Bead.priority` nullable overlay once the
+   upstream supervisor OpenAPI schema matches the observed wire shape.
 3. Push canonical graph presentation semantics down into Gas City or a shared
    package when the dashboard approximation is stable enough to specify.
