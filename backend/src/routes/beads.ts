@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import type { Response } from 'express';
-import type { GcBead, BeadUpdateInput } from 'gas-city-dashboard-shared';
+import {
+  OPERATOR_DISPLAY_ALIAS,
+  type GcBead,
+  type BeadUpdateInput,
+} from 'gas-city-dashboard-shared';
 import { GcClient } from '../gc-client.js';
 import {
   execBeadAction as defaultExecBeadAction,
@@ -174,7 +178,7 @@ export function beadsRouter(
 }
 
 // Bead CLAIM over HTTP (gascity-dashboard-mq2): PATCH /bead/{id} with
-// {status:'in_progress', assignee:'stephanie'}. Error mapping mirrors the
+// {status:'in_progress', assignee: OPERATOR_DISPLAY_ALIAS}. Error mapping mirrors the
 // maintainer sling handler: a true client-side timeout → 504, any other
 // upstream failure (non-2xx from the supervisor, network error) → 502,
 // with the same toWireInternal500 redaction (only details.name on the wire —
@@ -190,7 +194,7 @@ async function runBeadClaim(
   }
   const startedAt = Date.now();
   try {
-    await updateBead(beadId, { status: 'in_progress', assignee: 'stephanie' });
+    await updateBead(beadId, { status: 'in_progress', assignee: OPERATOR_DISPLAY_ALIAS });
     void recordAudit({
       type: 'dashboard.exec',
       endpoint: 'POST /api/beads/:id/claim',

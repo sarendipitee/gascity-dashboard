@@ -20,6 +20,14 @@ export type IsoTimestamp = string;
 export type BeadId = string;
 export type SessionId = string;
 
+export const OPERATOR_DISPLAY_ALIAS = 'stephanie';
+export const OPERATOR_WIRE_ALIAS = 'human';
+
+export const GC_EVENT_PREFIX = {
+  bead: 'bead.',
+  session: 'session.',
+} as const;
+
 export interface ClientErrorReport {
   readonly component: string;
   readonly operation: string;

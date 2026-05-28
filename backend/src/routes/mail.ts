@@ -1,5 +1,9 @@
 import { Router } from 'express';
-import type { GcMailItem } from 'gas-city-dashboard-shared';
+import {
+  OPERATOR_DISPLAY_ALIAS,
+  OPERATOR_WIRE_ALIAS,
+  type GcMailItem,
+} from 'gas-city-dashboard-shared';
 import { GcClient } from '../gc-client.js';
 import { recordAudit } from '../audit.js';
 import { LOG_COMPONENT } from '../logging.js';
@@ -23,8 +27,6 @@ const BOX_VALUES = new Set(['inbox', 'sent', 'all']);
 // `to === 'stephanie'` inbox filter returns nothing. Resolve the display
 // alias to the wire alias before matching so the operator's own inbox/sent
 // boxes actually populate.
-const OPERATOR_DISPLAY_ALIAS = 'stephanie';
-const OPERATOR_WIRE_ALIAS = 'human';
 // td-7t24i6 scope expansion: gc supervisor's mail endpoint defaults to
 // limit=50 and caps at 1000 (verified — limit=2000 returns 1000). 1000 is
 // the practical max. For the current corpus (~1167 mails) this covers

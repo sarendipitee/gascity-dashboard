@@ -8,7 +8,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { errorMessage, type ViewingAs } from 'gas-city-dashboard-shared';
+import {
+  errorMessage,
+  OPERATOR_DISPLAY_ALIAS,
+  OPERATOR_WIRE_ALIAS as SHARED_OPERATOR_WIRE_ALIAS,
+  type ViewingAs,
+} from 'gas-city-dashboard-shared';
 import { api } from '../api/client';
 import { prioritizeAliases, type AliasBucket } from '../hooks/aliasPriority';
 import {
@@ -41,12 +46,12 @@ import { reportClientError } from '../lib/clientErrorReporting';
 
 const STORAGE_KEY = 'gascity.dashboard.viewingAs';
 const COMPONENT = 'ViewingAsContext';
-const OPERATOR = 'stephanie';
+const OPERATOR = OPERATOR_DISPLAY_ALIAS;
 // gc's wire identity for the operator (mail is addressed to/from `human`,
 // not `stephanie` — see backend exec.ts and routes/mail.ts). The agent
 // panel hides this from the switchable list so it doesn't read as a second
 // inbox distinct from the operator's own.
-const OPERATOR_WIRE = 'human';
+const OPERATOR_WIRE = SHARED_OPERATOR_WIRE_ALIAS;
 const ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 
 // Bounded retry schedule for /api/sessions (gascity-dashboard-5gg).

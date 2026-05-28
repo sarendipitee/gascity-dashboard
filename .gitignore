@@ -37,4 +37,5 @@ credentials.*
 !.env.example
 !.github/
 !.github/**
-tmp/arch-best-practices-01.txt
+.scorecard/
+tmp/arch-best-practices-*.txt
