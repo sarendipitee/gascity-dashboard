@@ -192,9 +192,6 @@ async function runBeadClaim(
   const startedAt = Date.now();
   try {
     await updateBead(beadId, { status: 'in_progress', assignee: 'stephanie' });
-    // qhr9: await ensures the audit row is durable before the response
-    // returns. recordAudit() catches its own fs.appendFile failures (see
-    // audit.ts), so awaiting cannot propagate an error into the handler.
     await recordAudit({
       type: 'dashboard.exec',
       endpoint: 'POST /api/beads/:id/claim',
