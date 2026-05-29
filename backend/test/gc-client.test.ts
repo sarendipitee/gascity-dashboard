@@ -815,6 +815,78 @@ describe('GcClient error handling', () => {
     );
   });
 
+  // gascity-dashboard-19w: GET /v0/city/{cityName}/rigs replaces the
+  // on-disk city.toml parse. These tests pin the GcClient.listRigs
+  // boundary — the snapshot-cityStatus tests inject a pre-decoded
+  // GcRigList directly, so without these the URL + decoder path is
+  // untested.
+
+  test('19w: listRigs decodes a populated rig list (name+path only)', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      // Supervisor's RigResponse carries more fields (agent_count, suspended,
+      // git status, etc.); GcRig is intentionally narrowed to name+path.
+      // RigSchema uses passthrough, so the extras are accepted but not
+      // surfaced in the typed output.
+      res.end(JSON.stringify({
+        items: [
+          { name: 'gascity', path: '/home/ds/gascity/polecat', agent_count: 3, suspended: false },
+          { name: 'shared',  path: '/home/ds/shared/work',     agent_count: 0, suspended: false },
+        ],
+      }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    const out = await gc.listRigs();
+    assert.equal(out.items.length, 2);
+    assert.equal(out.items[0]?.name, 'gascity');
+    assert.equal(out.items[0]?.path, '/home/ds/gascity/polecat');
+    assert.equal(out.items[1]?.name, 'shared');
+    assert.equal(out.items[1]?.path, '/home/ds/shared/work');
+  });
+
+  test('19w: listRigs accepts items=null + partial signal (mirrors izgc F3 pattern)', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        items: null,
+        partial: true,
+        partial_errors: ['rig backend gascity unreachable'],
+      }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    const out = await gc.listRigs();
+    assert.deepEqual(out.items, []);
+    assert.equal(out.partial, true);
+    assert.deepEqual(out.partial_errors, ['rig backend gascity unreachable']);
+  });
+
+  test('19w: listRigs rejects malformed rig entries (missing required name)', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [{ path: '/no/name' }] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listRigs(),
+      /invalid gc supervisor listRigs payload/i,
+    );
+  });
+
   test('rejects malformed mail list payloads at the supervisor boundary', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
