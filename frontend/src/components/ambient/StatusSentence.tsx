@@ -42,32 +42,38 @@ function deepLinkHref(lane: WorkflowLane): string | null {
   if (lane.health.status !== 'available') return null;
   const stuck = lane.health.data.stuckNode;
   if (stuck.status !== 'available') return null;
-  // Security (per the 3ax close note): encodeURIComponent the supervisor-
-  // supplied node id so a future renamed gc.step_id with reserved chars
-  // cannot inject into the URL.
-  const node = encodeURIComponent(stuck.id);
-  const id = encodeURIComponent(lane.id);
-  // Preserve the existing scope deep-link contract from LaneCard.
+  // Path segments need explicit encodeURIComponent because they are
+  // interpolated into the template-string pathname; query params go
+  // through URLSearchParams.set which handles its own percent-encoding
+  // — pre-encoding the value would produce a double-encoded URL the
+  // receiver's URLSearchParams.get() would only decode once. (Phase 4
+  // code/ts-review found this.)
+  const idForPath = encodeURIComponent(lane.id);
   const scope = lane.scope.status === 'available' ? lane.scope : null;
   const qs = new URLSearchParams();
-  qs.set('node', node);
+  qs.set('node', stuck.id);
   if (scope) {
     qs.set('scope_kind', scope.kind);
     qs.set('scope_ref', scope.ref);
   }
-  return `/workflows/${id}?${qs.toString()}`;
+  return `/workflows/${idForPath}?${qs.toString()}`;
 }
 
 function laneToken(lane: WorkflowLane): string {
-  // Prefer external reference (PR/issue label, e.g. "adopt-pr-271")
-  // when available — that's what the operator recognises.
-  if (lane.external.status === 'available') return lane.external.label;
+  // Match the LaneCard pattern: both 'available' AND 'label_only'
+  // carry a human-readable PR/issue label the operator recognises.
+  // Only fall through to the workflow title when neither variant
+  // applies. (Phase 4 ts-review caught the label_only miss.)
+  if (lane.external.status !== 'unavailable') return lane.external.label;
   return lane.title;
 }
 
 function pickConcernPhrasing(lane: WorkflowLane): string {
   if (lane.health.status === 'available' && lane.health.data.needsOperator) {
-    return 'is waiting on your decision';
+    // Grammatically-extensible: the duration clause "for N min" attaches
+    // cleanly to "has been waiting on your decision". The earlier
+    // present-tense form left "22 min" stranded. (Phase 4 LOW.)
+    return 'has been waiting on your decision for';
   }
   return 'has waited on a review verdict for';
 }

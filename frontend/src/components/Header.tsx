@@ -57,7 +57,7 @@ export function Header() {
               <li key={r.to}>
                 <NavLink
                   to={r.to}
-                  {...(r.end ? { end: true } : {})}
+                  end={r.end ?? false}
                   className={({ isActive }) =>
                     [
                       'text-title transition-colors duration-150 ease-out-quart focus-mark',

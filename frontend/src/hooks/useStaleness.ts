@@ -7,14 +7,19 @@ import { useNow } from '../contexts/NowContext';
 // contract from gascity-dashboard-3ax); the threshold crossing happens
 // here on a 1s tick driven by NowContext.
 //
-// The "age" feeding the tier is min(lane.updatedAt, session.lastActive)
-// — operator-visible recency. A fresh session masks an old bead write.
+// The "age" feeding the tier is derived from max(lane.updatedAt,
+// session.lastActive) — i.e. the MOST-RECENT operator-visible fact.
+// A fresh session masks an old bead write because what the operator
+// can see (the session activity) is what should drive the tier.
 
 export type StalenessTier = 'fresh' | 'warning' | 'stalled' | 'unknown';
 
 /**
- * Tier boundaries. Tunable in one place so the PRD §12 acceptance tests
- * can pin them via fixtures without touching the renderer.
+ * Tier boundaries (ageMs lower-bounds). Tunable in one place so the PRD
+ * §12 acceptance tests can pin them via fixtures without touching the
+ * renderer. The `fresh: 0` entry exists only to keep the satisfies-Record
+ * exhaustive over `Exclude<StalenessTier, 'unknown'>`; the derivation
+ * reads only `warning` and `stalled` as thresholds.
  */
 export const STALENESS_TIER_MS = {
   fresh: 0,

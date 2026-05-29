@@ -24,29 +24,35 @@ export interface ConcernRegionProps {
 }
 
 function laneToken(lane: WorkflowLane): string {
-  if (lane.external.status === 'available') return lane.external.label;
+  // Match the LaneCard pattern: both 'available' AND 'label_only'
+  // carry an operator-recognisable PR/issue label.
+  if (lane.external.status !== 'unavailable') return lane.external.label;
   return lane.title;
 }
 
 function rowHref(lane: WorkflowLane): string {
-  const id = encodeURIComponent(lane.id);
+  // Path segments are interpolated into the template-string pathname
+  // and need explicit encoding; query params are set via URLSearchParams
+  // which percent-encodes its own values — pre-encoding would produce
+  // a double-encoded URL. (Phase 4 code/ts-review.)
+  const idForPath = encodeURIComponent(lane.id);
   const scope = lane.scope.status === 'available' ? lane.scope : null;
   if (lane.health.status === 'available' && lane.health.data.stuckNode.status === 'available') {
     const qs = new URLSearchParams();
-    qs.set('node', encodeURIComponent(lane.health.data.stuckNode.id));
+    qs.set('node', lane.health.data.stuckNode.id);
     if (scope) {
       qs.set('scope_kind', scope.kind);
       qs.set('scope_ref', scope.ref);
     }
-    return `/workflows/${id}?${qs.toString()}`;
+    return `/workflows/${idForPath}?${qs.toString()}`;
   }
   if (scope) {
     const qs = new URLSearchParams();
     qs.set('scope_kind', scope.kind);
     qs.set('scope_ref', scope.ref);
-    return `/workflows/${id}?${qs.toString()}`;
+    return `/workflows/${idForPath}?${qs.toString()}`;
   }
-  return `/workflows/${id}`;
+  return `/workflows/${idForPath}`;
 }
 
 function reasonLabel(reason: ConcernRow['reason']): string {

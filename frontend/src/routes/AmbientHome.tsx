@@ -59,6 +59,16 @@ function buildConcernRows(
   // The top-concern lane is already represented by the StatusSentence
   // maroon token, so it is omitted from the rows below to avoid
   // double-surfacing.
+  //
+  // Note (Phase 4 code-review M5): needsOperator INTENTIONALLY bypasses
+  // the phaseConfidence gate. The backend at health.ts:175 derives
+  // needsOperator from lane.phase ∈ {'approval','blocked'} — a structural
+  // bead-state fact, not a phase-resolution conclusion. A human-gate
+  // decision must surface even when the engine can't confidently classify
+  // the lane's stage, because the decision is exactly what the operator
+  // is being asked to make. The R2 maroon-on-inferred constraint applies
+  // only to the One Mark Rule (which ConcernRegion does not paint), not
+  // to surfacing the row.
   const rows: ConcernRow[] = [];
   for (const lane of lanes) {
     if (lane.id === topConcernId) continue;
@@ -163,9 +173,11 @@ export function AmbientHomePage() {
   const fresh = readFresh(data);
   // cycleKey advances per snapshot (drives R8 hysteresis); now-ticks
   // re-render the body but share the same generatedAt and so do not
-  // advance the favicon hysteresis. Use a sentinel for the loading
-  // path so the cycleKey type stays narrow.
-  const cycleKey = fresh?.snapshot.generatedAt ?? '';
+  // advance the favicon hysteresis. The 'pre-snapshot' sentinel is a
+  // non-ISO string a well-formed generatedAt cannot collide with,
+  // closing the gap Phase 4 L4 flagged where '' could match a
+  // pathological empty-string response.
+  const cycleKey = fresh?.snapshot.generatedAt ?? 'pre-snapshot';
 
   if (data === undefined && loading) {
     return (

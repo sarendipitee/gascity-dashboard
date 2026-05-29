@@ -1,4 +1,4 @@
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkflowLane, WorkflowLaneHealth } from 'gas-city-dashboard-shared';
 import { NowProvider } from '../contexts/NowContext';
@@ -162,7 +162,7 @@ describe('useStaleness', () => {
     expect(tier?.isStalled).toBe(false);
   });
 
-  it('emits ageMs and tier through the 1s tick boundary as the clock advances', async () => {
+  it('emits ageMs and tier through the 1s tick boundary as the clock advances', () => {
     // The render only changes when the tier crosses a boundary — but the
     // ageMs MUST update every tick because the rendered "waited N min"
     // string depends on it. (Phase 1 architect finding C3.)
@@ -174,14 +174,18 @@ describe('useStaleness', () => {
       updatedAt: justWarning,
       health: knownHealth(justWarning),
     });
-    const { result, rerender } = renderStaleness([lane]);
+    const { result } = renderStaleness([lane]);
     const initial = result.current.byLane.get('ticking');
     expect(initial?.tier).toBe('warning');
 
-    // Advance enough to cross the stalled threshold. The next render
-    // (driven by the NowContext tick) must reflect the new tier + age.
-    vi.advanceTimersByTime(STALENESS_THRESHOLD_MS - STALENESS_TIER_MS.warning + 1_000);
-    rerender();
+    // Advance enough to cross the stalled threshold and let React
+    // commit the resulting state update from the interval tick.
+    // act() flushes the interval's setNow call so the next read of
+    // result.current sees the new tier + age, exactly as it would
+    // in production. (Phase 4 code-review M4.)
+    act(() => {
+      vi.advanceTimersByTime(STALENESS_THRESHOLD_MS - STALENESS_TIER_MS.warning + 1_000);
+    });
     const later = result.current.byLane.get('ticking');
     expect(later?.tier).toBe('stalled');
     expect(later?.ageMs).toBeGreaterThan(initial?.ageMs ?? 0);

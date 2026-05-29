@@ -333,8 +333,12 @@ describe('AmbientHomePage', () => {
     expect(token.tagName.toLowerCase()).toBe('a');
     expect(token.textContent).toBe('adopt-pr-271');
     const href = (token as HTMLAnchorElement).getAttribute('href');
+    // Path segment encoding survives the URL pipeline as the consumer's
+    // useParams() will decode it once. Query params are encoded only once
+    // by URLSearchParams so the consumer's search.get('node') yields the
+    // raw 'review:check/2' — Phase 4 caught a pre-fix double-encode.
     expect(href).toMatch(/^\/workflows\/stalled%2Fwith%20chars\?/);
-    expect(href).toContain('node=review%253Acheck%252F2');
+    expect(href).toContain('node=review%3Acheck%2F2');
     expect(href).toContain('scope_kind=rig');
     expect(href).toContain('scope_ref=gascity');
 
