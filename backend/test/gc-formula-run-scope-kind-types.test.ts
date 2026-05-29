@@ -33,13 +33,18 @@ test('GcFormulaRun.scope_kind: known discriminants assignable, non-string reject
   assert.equal(future, 'workspace');
 
   // Negative case: a non-string is rejected at compile time.
+  // These declarations are compile-time-only assertions — the @ts-expect-error
+  // directives are the actual test. We deliberately do NOT runtime-assert on
+  // these values: tsc accepts the assignment via @ts-expect-error and the JS
+  // value still propagates (42, null), so a runtime check would pass
+  // vacuously and read as a runtime guarantee that does not exist.
   // @ts-expect-error - scope_kind is a string-valued discriminant; numbers
   // are not assignable to `'city' | 'rig' | (string & {})`.
-  const badNumber: ScopeKind = 42;
+  const _badNumber: ScopeKind = 42;
   // @ts-expect-error - same for `null`; the field is required and stringly typed.
-  const badNull: ScopeKind = null;
-  assert.equal(badNumber, 42);
-  assert.equal(badNull, null);
+  const _badNull: ScopeKind = null;
+  void _badNumber;
+  void _badNull;
 
   // Structural compatibility with `string`-typed consumers
   // (e.g. `parseWorkflowScopeKind(value: string)` in

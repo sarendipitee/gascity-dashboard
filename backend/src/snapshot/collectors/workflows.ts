@@ -787,12 +787,18 @@ function compareLanes(a: WorkflowLane, b: WorkflowLane): number {
 // gascity-dashboard-3vaz (follow-up to e7hj): the title-startswith-'mol-'
 // fallback only fires when the root bead is a fully-instantiated runnable
 // graph.v2 root (has both gc.formula_contract='graph.v2' and gc.run_target).
-// Mirrors the resolveWorkflowFormulaName guard so the lane card does not
-// surface an operator-edited descriptive title on a closed root as a
-// canonical formula name — exactly the false-positive condition the
-// run-detail page now flags with the e7hj warn tone. WorkflowLaneFormula
-// intentionally has no `source` discriminant; the lane card does not warn
-// on title-fallback provenance today.
+// Uses the same gc.formula_contract+gc.run_target guard as
+// resolveWorkflowFormulaName and reads from the SAME source (the root
+// bead's own title) — a child-task title that happens to start with 'mol-'
+// must never displace the root's identity on the lane card. The 'mol-'
+// prefix is the lane builder's additional conservative gate: the run-detail
+// page surfaces title-fallback in a warn tone (e7hj), but WorkflowLaneFormula
+// has no `source` discriminant so the lane card needs a tighter constraint
+// to avoid an operator-edited descriptive title leaking as a canonical
+// formula name. Phase 4 review finding (wave-3vaz-4lzn-e0hh-aqf8): prior
+// implementation scanned `issues.map(...).find(...)` for any 'mol-' title,
+// which would silently pick a child bead's title when the root's title
+// didn't match — caught by the multi-issue regression test below.
 function workflowFormula(
   rootId: string,
   issues: WorkflowIssue[],
@@ -807,10 +813,10 @@ function workflowFormula(
     stringValue(root?.metadata?.['gc.formula_contract']) === 'graph.v2' &&
     stringValue(root?.metadata?.['gc.run_target']).length > 0
   ) {
-    const fallback = issues
-      .map((i) => i.title)
-      .find((t) => t.startsWith('mol-'));
-    if (fallback) return { status: 'known', name: fallback };
+    const rootTitle = root?.title.trim();
+    if (rootTitle && rootTitle.startsWith('mol-')) {
+      return { status: 'known', name: rootTitle };
+    }
   }
 
   return { status: 'unavailable', error: 'workflow formula unavailable' };

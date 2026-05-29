@@ -152,13 +152,8 @@ function isValidStateMap(v: unknown): v is PrenormalizedSlungStateMap {
  * operators have rotated past gascity-dashboard-55b, this migration and the
  * `!== undefined` guard above can be removed (follow-up bead).
  *
- * Input is `PrenormalizedSlungStateMap`: structural fields are required and
- * well-typed (validated upstream), only `resolved_session_name` is
- * statically optional. That makes the `=== undefined` check honest:
- * TypeScript sees the field as possibly-undefined here, instead of the
- * non-optional `string | null` that flows out in the returned
- * `SlungStateMap`. Coercion uses `??` so an explicit `null` (modern entry)
- * passes through and absent (legacy entry) becomes `null`.
+ * See the `PrenormalizedSlungEntry` type definition above for the rationale
+ * of the input shape and the `??` coercion semantics.
  */
 function normalizeLegacyEntries(
   map: PrenormalizedSlungStateMap,

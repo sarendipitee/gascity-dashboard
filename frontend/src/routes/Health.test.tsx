@@ -9,7 +9,7 @@ import type {
   SystemHealth,
 } from 'gas-city-dashboard-shared';
 
-// izgc F7/F8 (gascity-dashboard-e0hh): coverage for the absent
+// gascity-dashboard-e0hh: coverage for the absent
 // supervisor.city / supervisor.version paths in Health.tsx —
 // (a) the warn-toned <Kv> blocks render "not reported by supervisor",
 // (b) buildSynopsis omits the "on <city>" locator clause, asserted
@@ -90,6 +90,12 @@ describe('HealthPage', () => {
     expect(versionValue?.className).not.toMatch(/text-warn/);
 
     const synopsis = synopsisFor(heading);
+    // Guard against a vacuous pass: if a future PageHeader refactor
+    // restructures the synopsis element, synopsisFor would return null
+    // and the positive match below would correctly fail — but assert
+    // explicitly so the failure mode is "missing synopsis node" rather
+    // than "positive match against an empty string".
+    expect(synopsis).not.toBeNull();
     expect(synopsis?.textContent ?? '').toMatch(/Supervisor healthy on racoon-city, uptime /);
   });
 });

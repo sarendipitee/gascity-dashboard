@@ -315,6 +315,63 @@ describe('buildWorkflowSummary', () => {
     });
   });
 
+  // Phase 4 regression: pre-fix workflowFormula scanned every issue title
+  // for a 'mol-*' prefix, so a child task with a 'mol-' title would silently
+  // displace the root's identity. After the Phase 4 fix the title fallback
+  // sources from the root bead's own title only, matching where
+  // resolveWorkflowFormulaName reads from.
+  test('3vaz: child bead with mol-* title does NOT displace root identity on lane card', () => {
+    const summary = buildWorkflowSummary([
+      issue({
+        id: 'ga-root',
+        title: 'PR adoption plan',
+        issue_type: 'molecule',
+        status: 'in_progress',
+        metadata: graphWorkflowMetadata({
+          'gc.run_target': '/home/ds/gascity/polecat',
+        }),
+      }),
+      issue({
+        id: 'ga-child',
+        title: 'mol-child-impostor',
+        status: 'in_progress',
+        metadata: { 'gc.root_bead_id': 'ga-root' },
+      }),
+    ]);
+
+    // Root title does not start with 'mol-' → fallback does not fire.
+    // Pre-fix this would have surfaced 'mol-child-impostor' from the child.
+    assert.deepEqual(summary.lanes[0]!.formula, {
+      status: 'unavailable',
+      error: 'workflow formula unavailable',
+    });
+  });
+
+  test('3vaz: root with mol-* title is used directly (root title, not first-found)', () => {
+    const summary = buildWorkflowSummary([
+      issue({
+        id: 'ga-root',
+        title: 'mol-canonical-name',
+        issue_type: 'molecule',
+        status: 'in_progress',
+        metadata: graphWorkflowMetadata({
+          'gc.run_target': '/home/ds/gascity/polecat',
+        }),
+      }),
+      issue({
+        id: 'ga-child',
+        title: 'mol-decoy',
+        status: 'in_progress',
+        metadata: { 'gc.root_bead_id': 'ga-root' },
+      }),
+    ]);
+
+    assert.deepEqual(summary.lanes[0]!.formula, {
+      status: 'known',
+      name: 'mol-canonical-name',
+    });
+  });
+
   test('carries active workflow progress as an explicit state', () => {
     const summary = buildWorkflowSummary([
       issue({
