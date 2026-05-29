@@ -382,11 +382,18 @@ type SchemaOutputFor<T> =
           & { [K in OptionalKeysOf<T>]?: SchemaOutputFor<T[K]> | undefined }
       : T;
 
+// The `{}` here is the canonical structural-equivalence trick for
+// detecting optional vs required keys (an empty object satisfies a Pick
+// of an optional field, but never a required one). Disabling the
+// no-empty-object-type rule for these two lines is the intent per
+// the rule's own documented remediation.
 type RequiredKeysOf<T> = {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
 }[keyof T];
 
 type OptionalKeysOf<T> = {
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   [K in keyof T]-?: {} extends Pick<T, K> ? K : never;
 }[keyof T];
 
