@@ -12,7 +12,6 @@ import type {
 
 import {
   aggregateAgentsByProvider,
-  aggregateSessionsByProvider,
   collectCityStatus,
 } from '../src/snapshot/collectors/cityStatus.js';
 
@@ -149,110 +148,6 @@ describe('aggregateAgentsByProvider', () => {
 
   test('returns empty array on empty input', () => {
     assert.deepEqual(aggregateAgentsByProvider([]), []);
-  });
-});
-
-describe('aggregateSessionsByProvider', () => {
-  test('aggregates active+total counts when every session has provider populated', () => {
-    const sessions: GcSession[] = [
-      sess({ id: 't-1', provider: 'codex', state: 'active' }),
-      sess({ id: 't-2', provider: 'codex', state: 'asleep' }),
-      sess({ id: 't-3', provider: 'codex', state: 'active' }),
-      sess({ id: 't-4', provider: 'claude', state: 'active' }),
-      sess({ id: 't-5', provider: 'claude', state: 'closed' }),
-      sess({ id: 't-6', provider: 'gemini', state: 'active' }),
-    ];
-
-    const breakdown = aggregateSessionsByProvider(sessions);
-
-    // Sorted by active desc, then provider asc.
-    assert.deepEqual(breakdown, [
-      { provider: 'codex', active: 2, total: 3 },
-      { provider: 'claude', active: 1, total: 2 },
-      { provider: 'gemini', active: 1, total: 1 },
-    ]);
-  });
-
-  test('skips sessions with empty provider string and logs a single warn (6bv7.2)', () => {
-    // 6bv7 F10 tightened GcSession.provider to required `string` per OpenAPI,
-    // but the aggregator still skips empty-string providers as a defensive
-    // guard against a degenerate supervisor response (the wire contract is
-    // `string`, not "non-empty string"). Title text is NEVER consulted —
-    // no inference fallback (ZFC).
-    //
-    // 6bv7.2: the skip is no longer silent — a single warn is emitted per
-    // call with the count, so a supervisor sending `provider: ""` for all
-    // sessions does not invisibly produce zero aggregated sessions.
-    // Bounded by SourceCache TTL (~45s) so no log-spam risk.
-    const warnMock = mock.method(console, 'warn', () => undefined);
-    try {
-      const sessions: GcSession[] = [
-        sess({ id: 't-1', provider: 'codex', state: 'active' }),
-        sess({ id: 't-2', title: 'codex/research', provider: '', state: 'active' }),
-        sess({ id: 't-3', title: 'claude/triage', provider: '', state: 'active' }),
-        sess({ id: 't-4', provider: 'claude', state: 'asleep' }),
-      ];
-
-      const breakdown = aggregateSessionsByProvider(sessions);
-
-      assert.deepEqual(breakdown, [
-        { provider: 'codex', active: 1, total: 1 },
-        { provider: 'claude', active: 0, total: 1 },
-      ]);
-
-      const emptyWarns = warnMock.mock.calls.filter((call) =>
-        String(call.arguments[0]).includes(
-          'aggregateSessionsByProvider: 2 sessions skipped due to empty provider',
-        ),
-      );
-      assert.equal(emptyWarns.length, 1, 'expected exactly one empty-provider warn per call');
-    } finally {
-      warnMock.mock.restore();
-    }
-  });
-
-  test('returns empty array AND warns once when every provider is the empty string', () => {
-    const warnMock = mock.method(console, 'warn', () => undefined);
-    try {
-      const sessions: GcSession[] = [
-        sess({ id: 't-1', title: 'codex/x', provider: '' }),
-        sess({ id: 't-2', title: 'claude/y', provider: '' }),
-      ];
-
-      assert.deepEqual(aggregateSessionsByProvider(sessions), []);
-
-      const emptyWarns = warnMock.mock.calls.filter((call) =>
-        String(call.arguments[0]).includes(
-          'aggregateSessionsByProvider: 2 sessions skipped due to empty provider',
-        ),
-      );
-      assert.equal(emptyWarns.length, 1);
-    } finally {
-      warnMock.mock.restore();
-    }
-  });
-
-  test('does NOT warn when every session has a populated provider (happy path)', () => {
-    const warnMock = mock.method(console, 'warn', () => undefined);
-    try {
-      const sessions: GcSession[] = [
-        sess({ id: 't-1', provider: 'codex', state: 'active' }),
-        sess({ id: 't-2', provider: 'claude', state: 'asleep' }),
-      ];
-
-      aggregateSessionsByProvider(sessions);
-
-      const emptyWarns = warnMock.mock.calls.filter((call) =>
-        String(call.arguments[0]).includes('aggregateSessionsByProvider:'),
-      );
-      assert.equal(emptyWarns.length, 0);
-    } finally {
-      warnMock.mock.restore();
-    }
-  });
-
-  test('returns empty array on empty input', () => {
-    assert.deepEqual(aggregateSessionsByProvider([]), []);
   });
 });
 

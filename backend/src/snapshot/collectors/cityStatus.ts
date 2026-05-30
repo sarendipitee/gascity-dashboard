@@ -29,8 +29,10 @@ import { SourceCache } from '../cache.js';
 // removes the undercount completely without ever inferring from titles
 // (the rejected ZFC-violating path). The wire field name remains
 // `sessionsByProvider` to keep the CityStatusSummary contract stable;
-// only the data source changes. aggregateSessionsByProvider is kept
-// exported for legacy callers but the collector no longer uses it.
+// only the data source changes. The pre-migration session-derived
+// implementation was deleted in Phase-4 review per the YAGNI rule
+// (no callers; would have been dead exported code). If a future bead
+// needs the session-derived behavior back, restore it from git history.
 //
 // maxSessions degradation (gascity-dashboard-19w): the supervisor's HTTP
 // API does NOT expose city-level max_active_sessions today. Verified
@@ -170,38 +172,6 @@ export async function collectCityStatus(
  * (not per-session) keeps the log volume bounded by the SourceCache TTL
  * (~45s) instead of scaling with session count.
  */
-export function aggregateSessionsByProvider(
-  sessions: ReadonlyArray<GcSession>,
-): CitySessionProvider[] {
-  const buckets = new Map<string, { active: number; total: number }>();
-  let emptyProviderCount = 0;
-
-  for (const session of sessions) {
-    const provider = session.provider;
-    if (!provider) {
-      emptyProviderCount += 1;
-      continue;
-    }
-
-    const bucket = buckets.get(provider) ?? { active: 0, total: 0 };
-    bucket.total += 1;
-    if (isActive(session.state)) {
-      bucket.active += 1;
-    }
-    buckets.set(provider, bucket);
-  }
-
-  if (emptyProviderCount > 0) {
-    logWarn(
-      LOG_COMPONENT.snapshot,
-      `aggregateSessionsByProvider: ${emptyProviderCount} sessions skipped due to empty provider`,
-    );
-  }
-
-  return Array.from(buckets.entries())
-    .map(([provider, counts]) => ({ provider, ...counts }))
-    .sort((a, b) => b.active - a.active || a.provider.localeCompare(b.provider));
-}
 
 /**
  * sd4: Aggregate AGENTS into a per-provider active/total breakdown.
