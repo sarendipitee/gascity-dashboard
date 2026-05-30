@@ -13,6 +13,17 @@ import {
   workflowBeadFilter,
 } from '../src/snapshot/collectors/workflows.js';
 import type { WorkflowIssue } from '../src/snapshot/collectors/phaseMapping.js';
+import type { GcClient } from '../src/gc-client.js';
+
+// mfb9.1: the cache's `gc` input is GcClient, but tests only need to
+// stub a subset of the surface the collector actually calls
+// (listBeads, listFormulaRuns, cityName). A bare `as never` cast
+// suppressed ALL signature checking on the mock object and hid the
+// mfb9 H1 finding. Picking the used methods (and Partial-ing so each
+// test can omit ones its code path doesn't exercise) restores
+// compile-time signature checking on every property a mock DOES set,
+// while keeping the final widen-to-GcClient explicit at the call site.
+type GcClientMock = Partial<Pick<GcClient, 'listBeads' | 'listFormulaRuns' | 'cityName'>>;
 
 // Lane builder + filter + cache tests for the workflows collector
 // (gascity-dashboard-0t6). Ported from demo-dash's workflows.test.ts
@@ -1094,7 +1105,7 @@ describe('createWorkflowsSourceCache', () => {
           }
           assert.fail(`unexpected listBeads params: ${JSON.stringify(params)}`);
         },
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 77,
     });
 
@@ -1150,7 +1161,7 @@ describe('createWorkflowsSourceCache', () => {
           }
           return { items: [], total: 0 };
         },
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 77,
     });
 
@@ -1281,7 +1292,7 @@ describe('createWorkflowsSourceCache', () => {
           };
         },
         cityName: 'ds-research',
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 1000,
     });
 
@@ -1340,7 +1351,7 @@ describe('createWorkflowsSourceCache', () => {
           throw new Error('simulated feed outage');
         },
         cityName: 'test',
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 1000,
     });
 
@@ -1411,7 +1422,7 @@ describe('createWorkflowsSourceCache', () => {
           partial: false,
         }),
         cityName: 'test',
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 1000,
     });
 
@@ -1487,7 +1498,7 @@ describe('createWorkflowsSourceCache', () => {
           partial: false,
         }),
         cityName: 'ds-research',
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 1000,
     });
 
@@ -1563,7 +1574,7 @@ describe('createWorkflowsSourceCache', () => {
           partial: false,
         }),
         cityName: 'ds-research',
-      } as never,
+      } satisfies GcClientMock as unknown as GcClient,
       limit: 1000,
     });
 
