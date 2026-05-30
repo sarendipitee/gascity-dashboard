@@ -16,6 +16,7 @@ import { WorkflowRunTabs } from '../components/workflow/WorkflowRunTabs';
 import { useWorkflowNodeSelection } from '../hooks/useWorkflowNodeSelection';
 import { useWorkflowRunDetail } from '../hooks/useWorkflowRunDetail';
 import { useEntityLinks } from '../hooks/useEntityLinks';
+import { NEEDS_YOU_VIEW_PARAM } from '../views/modules/maintainer/needsYou';
 
 export function WorkflowRunDetailPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
@@ -68,6 +69,14 @@ export function WorkflowRunDetailPage() {
         synopsis={synopsis}
         meta={
           <>
+            {search.get('from') === 'triage' && (
+              <Link
+                to={`/maintainer?view=${NEEDS_YOU_VIEW_PARAM}`}
+                className="focus-mark text-label uppercase tracking-wider text-fg-muted hover:text-fg"
+              >
+                ← Triage
+              </Link>
+            )}
             <Link
               to="/workflows"
               className="focus-mark text-label uppercase tracking-wider text-fg-muted hover:text-fg"
