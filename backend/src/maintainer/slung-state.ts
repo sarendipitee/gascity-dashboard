@@ -143,8 +143,11 @@ function isValidStateMap(v: unknown): v is PrenormalizedSlungStateMap {
     // Reject only when the field is present AND neither null nor string —
     // that's a real shape violation, not a legacy file.
     if ('resolved_session_name' in e) {
-      const v = e.resolved_session_name;
-      if (v !== null && typeof v !== 'string') return false;
+      // `rsn` (not `v`) so we don't shadow the outer `v: unknown`
+      // parameter of isValidStateMap — a reader diffing the function
+      // shouldn't have to track which scope `v` refers to.
+      const rsn = e.resolved_session_name;
+      if (rsn !== null && typeof rsn !== 'string') return false;
     }
   }
   return true;

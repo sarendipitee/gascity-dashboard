@@ -765,10 +765,14 @@ export type TriageItemStatus =
  * it up (see ParseTriageAssessmentOptions.notes), the contents will be
  * extracted from PR/issue comment bodies, which are third-party-author
  * controllable on incoming PRs. Treat as untrusted: any consumer MUST
- * render it as plain text (React auto-escapes), never via
- * `dangerouslySetInnerHTML`, and never as unescaped markdown or HTML.
- * The ingest-side bead must also length-cap and strip control chars at
- * parse time. See gascity-dashboard-8h3 for the contract.
+ * render it as plain text — React auto-escapes HTML but does NOT strip
+ * Unicode formatting characters; Bidi/RTL stripping must happen at the
+ * ingest writer per the field-level JSDoc below. Never render via
+ * `dangerouslySetInnerHTML`; never render as unescaped markdown or HTML.
+ * Non-React consumers (logs, downloads, copy-to-clipboard) inherit the
+ * same untrusted-input posture and must apply their own stripping if
+ * the ingest contract is bypassed. See gascity-dashboard-8h3 for the
+ * full contract.
  */
 export interface TriageAssessment {
   vetted_score: number;
@@ -786,8 +790,9 @@ export interface TriageAssessment {
    *   1. Length-cap (~2000 chars).
    *   2. Strip C0 control bytes (\x00-\x1f except \t/\n), DEL (\x7f),
    *      and C1 control bytes (\x80-\x9f).
-   *   3. Strip Unicode Bidi / RTL overrides: U+202A-202E (LRE/RLE/PDF/
-   *      LRO/RLO) and U+2066-2069 (LRI/RLI/FSI/PDI) — the "trojan
+   *   3. Strip ALL 12 Unicode Bidi / RTL codepoints from CVE-2021-42574:
+   *      U+061C (ALM), U+200E (LRM), U+200F (RLM), U+202A-202E (LRE/RLE/
+   *      PDF/LRO/RLO), U+2066-2069 (LRI/RLI/FSI/PDI) — the "trojan
    *      source" vector.
    *   4. Strip ANSI CSI / OSC escape sequences.
    *

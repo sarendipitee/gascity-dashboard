@@ -36,11 +36,9 @@ const CSI_RE = /\x1b\[[?0-9;]*[a-zA-Z]/g;
 // range (\x80-\x9f) — legacy 8-bit controls some terminals still
 // interpret as alternative escape introducers, same threat class as C0.
 const CTRL_RE = /[\x00-\x1f\x7f-\x9f]/g;
-// gascity-dashboard-cnu: Unicode Bidi / RTL overrides — the
-// "trojan source" vector. U+202A-202E and U+2066-2069 reorder visual
-// rendering of text without changing its bytes, so a forged
-// `admin‮[fake]` could render as a fake admin log line.
-const BIDI_RE = /[‪-‮⁦-⁩]/g;
+// See exec.ts BIDI_RE — same 12-codepoint trojan-source set from
+// CVE-2021-42574 (U+061C, U+200E, U+200F, U+202A-202E, U+2066-2069).
+const BIDI_RE = /[؜‎‏‪-‮⁦-⁩]/g;
 
 function stripNonPrintable(value: string): string {
   return value

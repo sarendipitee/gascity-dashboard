@@ -72,9 +72,15 @@ describe('sanitiseTerminalOutput', () => {
     }
   });
 
-  test('strips Bidi / RTL override characters', () => {
-    // U+202A..U+202E and U+2066..U+2069 — the "trojan source" set.
+  test('strips Bidi / RTL override characters (all 12 from CVE-2021-42574)', () => {
+    // Phase-4 M1: cover the FULL trojan-source set, not just the 9
+    // embedding/override codepoints. The 3 directional marks (ALM/LRM/
+    // RLM) are zero-width but live in the same Unicode bidi-control
+    // category — the original CVE-2021-42574 paper enumerates all 12.
     const bidi = [
+      '؜', // ALM (Arabic Letter Mark) — Phase-4 M1
+      '‎', // LRM (Left-to-Right Mark) — Phase-4 M1
+      '‏', // RLM (Right-to-Left Mark) — Phase-4 M1
       '‪', // LRE
       '‫', // RLE
       '‬', // PDF

@@ -117,9 +117,11 @@ describe('client error reporting route', () => {
   //
   //   - C1 controls (\x80-\x9f): legacy 8-bit control bytes some
   //     terminals still interpret as escape introducers.
-  //   - Unicode Bidi / RTL overrides (U+202A-202E, U+2066-2069): the
-  //     trojan-source vector — reorders visible text without changing
-  //     bytes, so `admin‮[fake]` could render as a fake admin line.
+  //   - Unicode Bidi / RTL overrides — ALL 12 codepoints from
+  //     CVE-2021-42574 (Phase-4 M1 hardening): U+061C (ALM), U+200E
+  //     (LRM), U+200F (RLM), U+202A-202E, U+2066-2069. Reorders or
+  //     biases visible text rendering, so `admin‮[fake]` could render
+  //     as a fake admin line.
   //
   // Browser-supplied fields go straight to the operator log, so the same
   // forge-a-log threat applies — both classes must be stripped here too.
@@ -130,7 +132,8 @@ describe('client error reporting route', () => {
     for (let code = 0x80; code <= 0x9f; code += 1) {
       c1 += String.fromCharCode(code);
     }
-    const bidi = '‪‫‬‭‮⁦⁧⁨⁩';
+    // All 12 trojan-source codepoints from CVE-2021-42574.
+    const bidi = '؜‎‏‪‫‬‭‮⁦⁧⁨⁩';
 
     await withRouter(logs, async (url) => {
       const res = await fetch(`${url}/api/client-errors`, {
@@ -148,7 +151,7 @@ describe('client error reporting route', () => {
     assert.equal(logs.length, 1);
     const line = logs[0]!;
     assert.doesNotMatch(line, /[\x80-\x9f]/);
-    assert.doesNotMatch(line, /[‪-‮⁦-⁩]/);
+    assert.doesNotMatch(line, /[؜‎‏‪-‮⁦-⁩]/);
     assert.match(line, /storage blocked end/);
   });
 });

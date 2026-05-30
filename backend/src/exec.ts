@@ -39,12 +39,14 @@ const OSC_RE = /\x1b\][^\x07]*\x07/g;
 // some terminals still interpret as alternative escape introducers;
 // they are the same threat class as C0 and must be stripped together.
 const CTRL_RE = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
-// gascity-dashboard-cnu: Unicode Bidi / RTL overrides — the
-// "trojan source" vector. U+202A-202E (LRE/RLE/PDF/LRO/RLO) and
-// U+2066-2069 (LRI/RLI/FSI/PDI) reorder the visual rendering of text
-// without changing its bytes, so they must never reach a UI string
-// sourced from supervisor output or any third-party transcript.
-const BIDI_RE = /[‪-‮⁦-⁩]/g;
+// gascity-dashboard-cnu + Phase-4 M1: ALL 12 Unicode Bidi / RTL
+// codepoints from CVE-2021-42574 (Boucher/Anderson 2021):
+// U+061C (ALM), U+200E (LRM), U+200F (RLM), U+202A-202E (LRE/RLE/PDF/
+// LRO/RLO), U+2066-2069 (LRI/RLI/FSI/PDI). The 3 marks (ALM/LRM/RLM)
+// are zero-width directional hints rather than embedding/overrides,
+// but they're in the same Unicode bidi-control category — the CVE
+// listed all 12 and a comprehensive strip costs nothing.
+const BIDI_RE = /[؜‎‏‪-‮⁦-⁩]/g;
 
 function sanitiseTerminalOutput(raw: string): string {
   return raw

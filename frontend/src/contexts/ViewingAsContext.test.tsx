@@ -265,15 +265,11 @@ describe('ViewingAsProvider — loadAliases initial flag transitions', () => {
 // is the safe accessor that returns `null` for any out-of-bounds index
 // instead of leaking `undefined` to a timer.
 describe('getSessionsRetryDelay — out-of-bounds guard', () => {
-  let warnSpy: ReturnType<typeof vi.spyOn>;
-
-  beforeEach(() => {
-    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    warnSpy.mockRestore();
-  });
+  // Phase-4 H1: getSessionsRetryDelay returns null silently for ALL
+  // invalid inputs (negative / non-integer / NaN / out-of-bounds) —
+  // frontend production code runs under `no-console: error`. The
+  // silent-null contract is what the caller relies on; surfacing
+  // a warning is the caller's choice.
 
   it('returns the scheduled delay for in-range indices', () => {
     expect(getSessionsRetryDelay(0)).toBe(30_000);
@@ -295,20 +291,15 @@ describe('getSessionsRetryDelay — out-of-bounds guard', () => {
     expect(getSessionsRetryDelay(99)).toBeNull();
   });
 
-  it('returns null and warns for a negative index', () => {
+  it('returns null for a negative index', () => {
     expect(getSessionsRetryDelay(-1)).toBeNull();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/invalid index -1/);
   });
 
-  it('returns null and warns for a non-integer index', () => {
+  it('returns null for a non-integer index', () => {
     expect(getSessionsRetryDelay(1.5)).toBeNull();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toMatch(/invalid index 1.5/);
   });
 
-  it('returns null and warns for NaN', () => {
+  it('returns null for NaN', () => {
     expect(getSessionsRetryDelay(Number.NaN)).toBeNull();
-    expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -63,34 +63,33 @@ const ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 const SESSIONS_RETRY_DELAYS_MS = [30_000, 90_000, 270_000] as const;
 
 // Safe-by-construction accessor for the retry schedule. Returns the delay
-// for the given attempt index, or `null` when the index is out of bounds.
-// The caller MUST treat `null` as "stop retrying" — never substitute a
-// fallback delay and never coerce it to a number. Co-locating the bounds
-// check with the indexed read closes the noUncheckedIndexedAccess gap:
-// even if a future refactor weakens the caller's own bounds check, this
-// accessor cannot return `undefined`. Out-of-bounds calls emit a warning
-// so the guard violation is visible in the console rather than silent.
+// for the given attempt index, or `null` when the index is out of bounds
+// or otherwise invalid (negative, non-integer, NaN). The caller MUST treat
+// `null` as "stop retrying" — never substitute a fallback delay and never
+// coerce it to a number. Co-locating the bounds check with the indexed
+// read closes the noUncheckedIndexedAccess gap: even if a future refactor
+// weakens the caller's own bounds check, this accessor cannot return
+// `undefined`.
+//
+// We deliberately do NOT log here. Frontend production code has
+// `no-console: error`, and the silent-`null` return is the contract — the
+// caller decides whether and how to report. The bounds-failed branch
+// returns null indistinguishably from the "exhausted the schedule" branch
+// so callers can treat both uniformly.
 export function getSessionsRetryDelay(attemptIndex: number): number | null {
   if (!Number.isInteger(attemptIndex) || attemptIndex < 0) {
-    console.warn(
-      `[${COMPONENT}] getSessionsRetryDelay called with invalid index ${attemptIndex}; refusing to schedule retry.`,
-    );
     return null;
   }
   if (attemptIndex >= SESSIONS_RETRY_DELAYS_MS.length) {
     return null;
   }
   const delay = SESSIONS_RETRY_DELAYS_MS[attemptIndex];
-  if (delay === undefined) {
-    // Defense in depth: the bounds check above already excludes this
-    // branch, but noUncheckedIndexedAccess types the read as
-    // `number | undefined`. Surfacing the impossible case as a warning
-    // beats letting `setTimeout(fn, undefined)` fire at 0 ms.
-    console.warn(
-      `[${COMPONENT}] getSessionsRetryDelay: bounds check passed but delay at index ${attemptIndex} was undefined; refusing to schedule retry.`,
-    );
-    return null;
-  }
+  // Defense-in-depth: the bounds check above logically excludes this
+  // branch, but `noUncheckedIndexedAccess` types the read as
+  // `number | undefined`, so the explicit guard is required for the
+  // accessor to honor its `number | null` return type without a non-null
+  // assertion. Silent `null` keeps the no-log contract.
+  if (delay === undefined) return null;
   return delay;
 }
 
