@@ -1,0 +1,15 @@
+// Frontend view registry — the single list iterated by App.tsx and
+// Header.tsx. PR-A contains only `health`; later PRs add the remaining
+// first-party views per PRD §3.
+//
+// The list is `readonly` so views cannot be appended at runtime. New
+// views are registered by editing this file — the compile-time edit IS
+// the design-review checkpoint, premortem #6.
+
+import { healthView, type FrontendViewDescriptor } from './modules/health.module.js';
+
+export const ALL_VIEWS: ReadonlyArray<FrontendViewDescriptor> = [
+  healthView,
+];
+
+export type { FrontendViewDescriptor };
