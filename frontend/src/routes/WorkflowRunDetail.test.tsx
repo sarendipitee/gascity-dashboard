@@ -184,6 +184,56 @@ describe('WorkflowRunDetailPage', () => {
     expect(screen.getByText(/v12 · seq 92/i)).toBeTruthy();
   });
 
+  it('ignores city events whose gc metadata identifies another workflow run', async () => {
+    renderPage();
+    await screen.findByRole('heading', { name: /adopt pr #42/i });
+    const cityStream = requireCityEventSource();
+    const workflowFetchCount = workflowUrls().length;
+
+    currentDetail = {
+      ...detail,
+      title: 'Different workflow should not refresh this page',
+      snapshotVersion: 99,
+      snapshotEventSeq: { kind: 'known', seq: 199 },
+    };
+    cityStream.dispatch('event', {
+      type: `${GC_EVENT_PREFIX.bead}updated`,
+      payload: {
+        bead: {
+          metadata: {
+            'gc.workflow_id': 'other-workflow',
+            'gc.root_bead_id': 'other-root',
+          },
+        },
+      },
+    });
+
+    await Promise.resolve();
+    expect(workflowUrls()).toHaveLength(workflowFetchCount);
+    expect(screen.getByRole('heading', { name: /adopt pr #42/i })).toBeTruthy();
+
+    currentDetail = {
+      ...detail,
+      title: 'Adopt PR #42 current workflow refresh',
+      snapshotVersion: 12,
+      snapshotEventSeq: { kind: 'known', seq: 92 },
+    };
+    cityStream.dispatch('event', {
+      type: `${GC_EVENT_PREFIX.bead}updated`,
+      payload: {
+        bead: {
+          metadata: {
+            'gc.workflow_id': detail.workflowId,
+            'gc.root_bead_id': detail.rootBeadId,
+          },
+        },
+      },
+    });
+
+    await screen.findByRole('heading', { name: /adopt pr #42 current workflow refresh/i });
+    expect(screen.getByText(/v12 · seq 92/i)).toBeTruthy();
+  });
+
   it('rejects a half-specified scope query without loading the workflow', async () => {
     // Only scope_kind, no scope_ref. The backend rejects this as a 400, so the
     // frontend must fail closed too — silently dropping the scope would load the
@@ -461,6 +511,10 @@ function requireCityEventSource(): FakeEventSource {
 
 function sessionEventSources(): FakeEventSource[] {
   return eventSources.filter((eventSource) => eventSource.url.startsWith('/api/sessions/'));
+}
+
+function workflowUrls(): string[] {
+  return fetchUrls.filter((url) => url.startsWith('/api/workflows/'));
 }
 
 function withoutNode(detailValue: WorkflowRunDetail, nodeId: string): WorkflowRunDetail {

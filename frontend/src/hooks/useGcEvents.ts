@@ -8,6 +8,19 @@ import { reportClientError } from '../lib/clientErrorReporting';
 // the browser.
 
 export type GcEventConnState = 'connecting' | 'open' | 'degraded' | 'closed';
+export type GcEventEnvelope = {
+  type: string;
+  workflow?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+  bead?: Record<string, unknown>;
+  root?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export interface GcEventRefreshOptions {
+  matches?: (event: GcEventEnvelope) => boolean;
+}
 
 /**
  * Subscribe to gc events. When an event whose type starts with any of
@@ -17,10 +30,13 @@ export type GcEventConnState = 'connecting' | 'open' | 'degraded' | 'closed';
 export function useGcEventRefresh(
   prefixes: ReadonlyArray<string>,
   onMatch: () => void,
+  options: GcEventRefreshOptions = {},
 ): GcEventConnState {
   const [state, setState] = useState<GcEventConnState>('connecting');
   const onMatchRef = useRef(onMatch);
   onMatchRef.current = onMatch;
+  const matchesRef = useRef(options.matches);
+  matchesRef.current = options.matches;
   // Stable hash of prefixes for the effect dep array.
   const prefixKey = prefixes.join(',');
 
@@ -100,15 +116,20 @@ export function useGcEventRefresh(
       // names them.
       const handleData = (msg: MessageEvent<string>) => {
         if (cancelled) return;
-        let parsed: { type?: string } | null = null;
+        let parsed: unknown = null;
         try {
-          parsed = JSON.parse(msg.data) as { type?: string };
+          parsed = JSON.parse(msg.data);
         } catch {
           setState('degraded');
           reportMalformedEventOnce('invalid JSON');
           return;
         }
-        const t = parsed?.type;
+        if (!isRecord(parsed)) {
+          setState('degraded');
+          reportMalformedEventOnce('missing string event type');
+          return;
+        }
+        const t = parsed.type;
         if (typeof t !== 'string') {
           setState('degraded');
           reportMalformedEventOnce('missing string event type');
@@ -117,7 +138,8 @@ export function useGcEventRefresh(
         setState('open');
         for (const prefix of prefixes) {
           if (t.startsWith(prefix)) {
-            scheduleMatch();
+            const event = parsed as GcEventEnvelope;
+            if (matchesRef.current?.(event) ?? true) scheduleMatch();
             break;
           }
         }
@@ -161,4 +183,8 @@ function reportMalformedEvent(reason: string): void {
     operation: 'parse event',
     message: `Malformed gc event payload: ${reason}.`,
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -178,7 +178,8 @@ The route sequence is:
    `scope_ref`.
 2. The backend fetches the supervisor workflow snapshot.
 3. For city-store workflows, runtime bead reads overlay current status,
-   assignee, cwd/session metadata, and other presentation fields onto the
+   assignee, cwd/session metadata, `session_id`/`session_name`,
+   `gc.session_id`/`gc.session_name`, and other presentation fields onto the
    embedded snapshot rows.
 4. For rig-store workflows, the embedded workflow snapshot is treated as
    authoritative because the supervisor does not expose rig-store per-bead
@@ -186,14 +187,46 @@ The route sequence is:
 5. The backend fetches session summaries so node instances can resolve attached
    sessions to canonical session ids.
 6. The backend fetches formula detail/preview when the root bead provides
-   enough metadata. This gives compiled formula order without local file
-   parsing.
+   `gc.formula` plus a target from `gc.run_target`, `gc.routed_to`, or the
+   root assignee. This gives compiled formula order without local file parsing.
 7. `enrichWorkflowRun()` validates graph.v2 identity and calls
    `buildRunningFormulaRun()`.
 8. `buildRunningFormulaRun()` groups beads, orders groups, builds execution
    instances, builds edges, applies display status, builds lanes, calculates
    progress, and returns `RunningFormulaRun`.
 9. `enrichWorkflowRun()` emits `WorkflowRunDetail`.
+
+## Current Supervisor Data Sources
+
+The dashboard can build the current detail view from existing supervisor data.
+The important sources are:
+
+- Workflow snapshot identity: `workflow_id`, `root_bead_id`,
+  `root_store_ref`, `resolved_root_store`, `scope_kind`, `scope_ref`,
+  snapshot version/sequence, `partial`, beads, and deps.
+- Root bead metadata: `gc.formula_contract`, `gc.formula`,
+  `gc.run_target`/`gc.routed_to`, `gc.cwd`/`gc.work_dir`,
+  `gc.rig_root`, and optional `gc.workflow_id`/`gc.root_bead_id` identity.
+- Per-bead presentation metadata: `gc.kind`, `gc.original_kind`,
+  `gc.logical_bead_id`, `gc.step_id`, `gc.step_ref`, `gc.scope_ref`,
+  `gc.control_for`, `gc.iteration`, `gc.attempt`, `gc.max_attempts`, and
+  `gc.outcome`.
+- Runtime bead overlay metadata: unprefixed `session_id`/`session_name` and
+  supervisor-prefixed `gc.session_id`/`gc.session_name`, plus cwd/rig-root
+  metadata used for the execution path.
+- Session summaries: current supervisor sessions resolve session ids, aliases,
+  titles, templates, and runtime session names to canonical transcript links.
+- Formula detail: compiled preview/order comes from the supervisor formula API
+  once the root bead supplies the formula name and run target.
+- City events: exact invalidation is available when an event carries
+  top-level workflow identity or bead metadata with `gc.workflow_id` and
+  `gc.root_bead_id`. Events without identity remain broad invalidation signals.
+
+Gasworks uses the same metadata family for its workflow presentation graph:
+logical identity comes from `gc.logical_bead_id`/`gc.step_ref`, scope and loop
+state from `gc.scope_ref`/iteration metadata, and session links from
+unprefixed or `gc.*` session metadata. Those are therefore implementation data
+sources, not missing supervisor API surfaces.
 
 ## Status Model
 
@@ -288,10 +321,12 @@ There are two independent stream paths today:
 
 Current implementation note: the Workflows list subscribes to `bead.*` city
 events, and the Workflow Run Detail page subscribes to both `bead.*` and
-`session.*` city events. Both paths treat those events as invalidation
-signals and refetch whole backend-owned projections. Active selected sessions
-also open their own transcript stream; that stream updates only the transcript
-panel, not the graph projection.
+`session.*` city events. The detail page filters matching events to the current
+run when the event envelope or bead metadata carries `workflow_id`,
+`root_bead_id`, `gc.workflow_id`, or `gc.root_bead_id`; otherwise it falls back
+to broad invalidation and refetches the whole backend-owned projection. Active
+selected sessions also open their own transcript stream; that stream updates
+only the transcript panel, not the graph projection.
 
 ## Current Implementation Against The Ideal
 
@@ -309,10 +344,12 @@ Implemented:
 - status presentation for pending, ready, running, done, failed, blocked, and
   skipped
 - progress counts in `WorkflowRunProgress`
-- session link resolution from bead metadata and current session summaries
+- session link resolution from unprefixed and `gc.*` bead metadata plus current
+  session summaries
 - streamable session marking for current running instances
 - city-event invalidation on the detail page for `bead.*` and `session.*`
-  changes, using whole-projection refresh rather than client-side mutation
+  changes, filtered by workflow/root identity when event metadata provides it,
+  using whole-projection refresh rather than client-side mutation
 - current working-tree diff from the execution folder
 - explicit workflow completeness with partial reasons instead of a generic
   `partial` boolean
@@ -334,6 +371,65 @@ Implemented:
 - tests asserting that current running execution instances either have an
   attached streamable session or expose `session_unresolved`
 
+## Fixture Gap Analysis
+
+`frontend/src/test/fixtures/workflow-run-detail.json` is the richest current
+browser fixture for this route. It models a real run detail with seven semantic
+nodes, four dependency edges, one lane, four transcript snapshots, one active
+session stream, hidden control badges, historical-only evidence, retry/loop
+instances, no-graph and degraded diff variants in the harness, and both
+attached and unresolved session states.
+
+Current implementation coverage against that fixture:
+
+- Header and metadata consume the fixture's title, formula, root bead, scope,
+  resolved store, snapshot version/sequence, completeness, and progress counts.
+- The graph consumes visible nodes, construct kinds, statuses, bounded attempt
+  badges, stacked iteration summaries, hidden-control badges, and
+  `visibleInGraph`/`historicalOnly`.
+- The evidence panel consumes current working-tree diff states, transcript
+  snapshots, active stream turns, historical iteration transcripts, failed retry
+  transcript links, unresolved-session empty states, and not-started empty
+  states.
+- The route consumes fixture-backed workflow/root event identity via the city
+  event matcher and falls back to broad invalidation when no identity is
+  present.
+- The deterministic browser harness covers the fixture journey in both light
+  and dark themes, including scoped navigation, diff rendering, related
+  entities, active session streaming, historical-only evidence, partial runs,
+  no-graph runs, and diff unavailable states.
+
+Current implementation gaps against the fixture data:
+
+1. **Dependency edges are summarized, not drawn.** The fixture carries four
+   `WorkflowDisplayEdge` rows and `progress.edgeCount`; the UI renders the
+   count (`4 dependency edges`) but does not draw source-to-target connectors,
+   edge labels, or edge-kind-specific affordances. Backend edge semantics still
+   feed status derivation before the browser receives the detail.
+2. **Lanes are not rendered in the run-detail graph.** The fixture carries a
+   `lanes` array, but `WorkflowRunDiagram` intentionally preserves
+   `detail.nodes` order and ignores lane grouping. With the current one-lane
+   fixture this is not visible, but a multi-lane run would not show lane labels
+   or lane boundaries on the detail page.
+3. **Mixed attached-history and current-unresolved instances collapse to the
+   attached history in the session panel.** For `apply-fixes`, the fixture has
+   a historical attached transcript and a current `not_started` instance. The
+   session panel filters to attached instances before building iteration and
+   attempt controls, so it shows the historical transcript but does not also
+   surface the current not-started instance for that selected node.
+4. **Execution-instance identity is internal-only.** The fixture carries
+   `currentBeadId`, `visibleExecutionInstanceId`, execution instance ids, and
+   bead ids. The current UI uses these for keys, selection, and transcript
+   lookup, but does not expose them as inspectable/copyable operator metadata.
+5. **Attempt summary is compact on graph nodes.** Bounded retry state is shown
+   as a small node suffix such as `attempt 1/3`, and multi-attached attempts
+   become session-panel radios. The graph does not yet expose the full
+   `attemptSummary.active` state when the active/current instance has no
+   attached session.
+
+These are dashboard presentation gaps, not current gc supervisor API gaps. The
+fixture already has the data needed to address them.
+
 External constraints and future ownership:
 
 - Formula detail/preview improves ordering, but the dashboard still carries a
@@ -342,8 +438,10 @@ External constraints and future ownership:
 - Runtime bead overlay is complete for city-store workflows, but rig-store
   workflows depend on the embedded snapshot because the current supervisor API
   lacks rig-store per-bead reads.
-- Session resolution uses current session summaries plus bead metadata. It can
-  still fail when supervisor metadata does not expose a stable session id/name.
+- Session resolution uses current session summaries plus unprefixed and `gc.*`
+  bead metadata. It can still surface `session_unresolved` when no session
+  identity exists on the bead and the assignee cannot be resolved, but that is
+  data absence for that execution, not a missing API shape.
 
 ## Gas City And Shared Change Tracker
 
@@ -356,23 +454,32 @@ from dashboard-owned approximation to the target boundary:
    visible graph nodes, logical edges, scope groups, and compiled display order.
    The dashboard should consume that shape instead of deriving it from bead
    metadata in TypeScript.
-2. **Stable execution instance identity.** Supervisor workflow snapshots should
-   expose concrete execution instance ids, semantic node ids, loop iteration,
-   retry attempt, current/historical flags, and the session id/name attached to
-   each running or completed execution instance.
-3. **Scoped runtime bead reads or fresh scoped snapshots.** The supervisor
+2. **Scoped runtime bead reads or fresh scoped snapshots.** The supervisor
    should expose rig-store bead reads or guarantee that scoped workflow
    snapshots include current runtime status for non-city stores.
-4. **Formula detail completeness.** The formula detail API should expose the
-   compiled graph.v2 preview, construct metadata, and display order without
-   requiring the dashboard to infer a target from root-bead metadata.
-5. **OpenAPI schema alignment.** The supervisor OpenAPI schema should match
+3. **OpenAPI schema alignment.** The supervisor OpenAPI schema should match
    observed payloads, especially nullable `Bead.priority`, so dashboard schema
    overlays can be removed.
-6. **Projection invalidation keys.** City events should include enough workflow
-   identity/scope information to invalidate the exact run projection without
-   broad route refreshes. Full incremental graph patches remain out of scope
-   until a backend-owned reducer exists.
+4. **Optional canonical execution-instance fields.** Existing metadata is
+   sufficient for the current detail page, but a canonical upstream/shared
+   presentation shape could expose execution instance ids, semantic node ids,
+   loop iteration, retry attempt, current/historical flags, and attached
+   session identity directly so the dashboard no longer derives them.
+
+Items that are not current supervisor API gaps after validating the Gasworks
+implementation:
+
+- Workflow/root identity for projection invalidation is available from
+  top-level workflow data or bead metadata `gc.workflow_id`/`gc.root_bead_id`;
+  events without identity still fall back to broad refresh.
+- Session identity is available through `session_id`/`session_name` and
+  `gc.session_id`/`gc.session_name`.
+- Formula detail target selection can use root-bead `gc.run_target`,
+  `gc.routed_to`, or assignee; no local formula-file parsing is required.
+- Logical grouping, loop scope, retry attempts, and hidden-control targeting
+  have usable metadata sources: `gc.logical_bead_id`, `gc.step_ref`,
+  `gc.scope_ref`, `gc.control_for`, `gc.iteration`, `gc.attempt`, and
+  `gc.max_attempts`.
 
 Intentionally outside the current dashboard-owned implementation target:
 

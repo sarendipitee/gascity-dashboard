@@ -39,8 +39,8 @@ describe('workflow session link resolution', () => {
     );
   });
 
-  test('ignores non-supervisor session metadata aliases', () => {
-    assert.equal(
+  test('uses gc-prefixed supervisor session metadata when available', () => {
+    assert.deepEqual(
       workflowSessionLinkFor(
         workflowBead({
           metadata: {
@@ -53,7 +53,11 @@ describe('workflow session link resolution', () => {
         }),
         'active',
       ),
-      undefined,
+      {
+        sessionId: 'gc-session-1',
+        sessionName: 'gc-session-name',
+        assignee: 'gc-session-name',
+      },
     );
   });
 

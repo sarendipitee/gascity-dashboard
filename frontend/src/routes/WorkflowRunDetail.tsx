@@ -15,6 +15,7 @@ import { BeadDetailModal } from '../components/BeadDetailModal';
 import { WorkflowRunDiagram } from '../components/workflow/WorkflowRunDiagram';
 import { WorkflowRunTabs } from '../components/workflow/WorkflowRunTabs';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
+import type { GcEventEnvelope } from '../hooks/useGcEvents';
 import { useWorkflowNodeSelection } from '../hooks/useWorkflowNodeSelection';
 import { useWorkflowRunDetail } from '../hooks/useWorkflowRunDetail';
 import { useEntityLinks } from '../hooks/useEntityLinks';
@@ -57,6 +58,7 @@ export function WorkflowRunDetailPage() {
   useGcEventRefresh(
     routeError ? NO_EVENT_PREFIXES : WORKFLOW_DETAIL_EVENT_PREFIXES,
     () => void runDetail.refresh(),
+    { matches: (event) => workflowRunDetailEventMatches(event, detail) },
   );
   const pageError = routeError ?? loadError;
   const { selectedNodeId, selectedNode, toggleNode } = useWorkflowNodeSelection(
@@ -207,6 +209,75 @@ function partialReasonLabel(reason: WorkflowRunPartialReason): string {
     case 'formula_detail_unavailable':
       return 'formula detail is unavailable';
   }
+}
+
+function workflowRunDetailEventMatches(
+  event: GcEventEnvelope,
+  detail: WorkflowRunDetailData | null,
+): boolean {
+  if (detail === null) return true;
+  const identity = workflowEventIdentity(event);
+  const workflowMatches =
+    identity.workflowIds.size === 0 || identity.workflowIds.has(detail.workflowId);
+  const rootMatches =
+    identity.rootBeadIds.size === 0 || identity.rootBeadIds.has(detail.rootBeadId);
+  return workflowMatches && rootMatches;
+}
+
+interface WorkflowEventIdentity {
+  workflowIds: Set<string>;
+  rootBeadIds: Set<string>;
+}
+
+function workflowEventIdentity(event: GcEventEnvelope): WorkflowEventIdentity {
+  const identity: WorkflowEventIdentity = {
+    workflowIds: new Set<string>(),
+    rootBeadIds: new Set<string>(),
+  };
+  collectWorkflowIdentity(event, identity);
+  collectWorkflowIdentity(recordValue(event.workflow), identity);
+  collectWorkflowIdentity(recordValue(event.payload), identity);
+  collectWorkflowIdentity(recordValue(recordValue(event.payload)?.workflow), identity);
+  collectWorkflowIdentity(recordValue(event.bead), identity);
+  collectWorkflowIdentity(recordValue(recordValue(event.payload)?.bead), identity);
+  collectWorkflowIdentity(recordValue(event.root), identity);
+  collectWorkflowIdentity(recordValue(recordValue(event.payload)?.root), identity);
+  collectMetadataIdentity(recordValue(event.metadata), identity);
+  collectMetadataIdentity(recordValue(recordValue(event.payload)?.metadata), identity);
+  return identity;
+}
+
+function collectWorkflowIdentity(
+  value: Record<string, unknown> | undefined,
+  identity: WorkflowEventIdentity,
+): void {
+  if (!value) return;
+  addString(identity.workflowIds, value.workflow_id);
+  addString(identity.rootBeadIds, value.root_bead_id);
+  collectMetadataIdentity(recordValue(value.metadata), identity);
+}
+
+function collectMetadataIdentity(
+  metadata: Record<string, unknown> | undefined,
+  identity: WorkflowEventIdentity,
+): void {
+  if (!metadata) return;
+  addString(identity.workflowIds, metadata['gc.workflow_id']);
+  addString(identity.workflowIds, metadata.workflow_id);
+  addString(identity.rootBeadIds, metadata['gc.root_bead_id']);
+  addString(identity.rootBeadIds, metadata.root_bead_id);
+}
+
+function addString(target: Set<string>, value: unknown): void {
+  if (typeof value !== 'string') return;
+  const clean = value.trim();
+  if (clean) target.add(clean);
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 type ScopeParseResult =

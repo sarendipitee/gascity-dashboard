@@ -37,6 +37,40 @@ describe('useGcEventRefresh', () => {
     expect(result.current).toBe('open');
   });
 
+  it('lets callers ignore prefix-matching events outside their projection', () => {
+    const onMatch = vi.fn();
+    const { result } = renderHook(() =>
+      useGcEventRefresh([GC_EVENT_PREFIX.bead], onMatch, {
+        matches: (event) => event.workflow?.workflow_id === 'current-workflow',
+      }),
+    );
+
+    act(() => eventSources[0]?.open());
+    expect(result.current).toBe('open');
+
+    act(() =>
+      eventSources[0]?.emitNamed(
+        'event',
+        JSON.stringify({
+          type: 'bead.updated',
+          workflow: { workflow_id: 'other-workflow' },
+        }),
+      ),
+    );
+    expect(onMatch).not.toHaveBeenCalled();
+
+    act(() =>
+      eventSources[0]?.emitNamed(
+        'event',
+        JSON.stringify({
+          type: 'bead.updated',
+          workflow: { workflow_id: 'current-workflow' },
+        }),
+      ),
+    );
+    expect(onMatch).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces malformed event payloads as degraded instead of silently swallowing them', () => {
     const onMatch = vi.fn();
     const { result } = renderHook(() => useGcEventRefresh([GC_EVENT_PREFIX.bead], onMatch));

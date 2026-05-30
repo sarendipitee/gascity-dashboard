@@ -15,6 +15,8 @@ const PRESENTATION_METADATA_KEYS = [
   'rig_root',
   'session_id',
   'session_name',
+  'gc.session_id',
+  'gc.session_name',
   'rig_id',
 ] as const;
 
