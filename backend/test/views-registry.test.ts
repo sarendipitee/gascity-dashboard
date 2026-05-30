@@ -33,6 +33,8 @@ function makeConfig(overrides: Partial<AdminConfig> = {}): AdminConfig {
       },
     },
     useFixtures: false,
+    enabledModules: null,
+    defaultView: null,
     ...overrides,
   };
 }
