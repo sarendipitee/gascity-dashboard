@@ -179,16 +179,17 @@ The route sequence is:
 2. The backend fetches the supervisor workflow snapshot.
 3. For city-store workflows, runtime bead reads overlay current status,
    assignee, cwd/session metadata, `session_id`/`session_name`,
-   `gc.session_id`/`gc.session_name`, and other presentation fields onto the
-   embedded snapshot rows.
+   `gc.session_id`/`gc.session_name`, t3bridge `gc.sessionName`, and other
+   presentation fields onto the embedded snapshot rows.
 4. For rig-store workflows, the embedded workflow snapshot is treated as
    authoritative because the supervisor does not expose rig-store per-bead
    reads through the city bead endpoint.
 5. The backend fetches session summaries so node instances can resolve attached
    sessions to canonical session ids.
 6. The backend fetches formula detail/preview when the root bead provides
-   `gc.formula` plus a target from `gc.run_target`, `gc.routed_to`, or the
-   root assignee. This gives compiled formula order without local file parsing.
+   `gc.formula` or Gas City's `gc.formula_name` plus a target from
+   `gc.run_target`, `gc.routed_to`, or the root assignee. This gives compiled
+   formula order without local file parsing.
 7. `enrichWorkflowRun()` validates graph.v2 identity and calls
    `buildRunningFormulaRun()`.
 8. `buildRunningFormulaRun()` groups beads, orders groups, builds execution
@@ -204,16 +205,19 @@ The important sources are:
 - Workflow snapshot identity: `workflow_id`, `root_bead_id`,
   `root_store_ref`, `resolved_root_store`, `scope_kind`, `scope_ref`,
   snapshot version/sequence, `partial`, beads, and deps.
-- Root bead metadata: `gc.formula_contract`, `gc.formula`,
+- Root bead metadata: `gc.formula_contract`, `gc.formula`/`gc.formula_name`,
   `gc.run_target`/`gc.routed_to`, `gc.cwd`/`gc.work_dir`,
   `gc.rig_root`, and optional `gc.workflow_id`/`gc.root_bead_id` identity.
-- Per-bead presentation metadata: `gc.kind`, `gc.original_kind`,
+- Per-bead graph metadata: `gc.kind`, `gc.original_kind`,
   `gc.logical_bead_id`, `gc.step_id`, `gc.step_ref`, `gc.scope_ref`,
   `gc.control_for`, `gc.iteration`, `gc.attempt`, `gc.max_attempts`, and
-  `gc.outcome`.
-- Runtime bead overlay metadata: unprefixed `session_id`/`session_name` and
-  supervisor-prefixed `gc.session_id`/`gc.session_name`, plus cwd/rig-root
-  metadata used for the execution path.
+  `gc.outcome`. Gas City's graph.v2 compiler, molecule instantiation, workflow
+  snapshot API, event projection, and tests all use this metadata family; these
+  fields are authoritative graph data, not dashboard guesses merely because they
+  live in a metadata map.
+- Runtime bead overlay metadata: unprefixed `session_id`/`session_name`,
+  downstream/Gasworks `gc.session_id`/`gc.session_name`, and t3bridge
+  `gc.sessionName`, plus cwd/rig-root metadata used for the execution path.
 - Session summaries: current supervisor sessions resolve session ids, aliases,
   titles, templates, and runtime session names to canonical transcript links.
 - Formula detail: compiled preview/order comes from the supervisor formula API
@@ -227,6 +231,19 @@ logical identity comes from `gc.logical_bead_id`/`gc.step_ref`, scope and loop
 state from `gc.scope_ref`/iteration metadata, and session links from
 unprefixed or `gc.*` session metadata. Those are therefore implementation data
 sources, not missing supervisor API surfaces.
+
+The Gas City implementation adds two important boundary facts:
+
+- Gas City's core supervisor always emits empty `logical_nodes`,
+  `logical_edges`, and `scope_groups` arrays today. The Go type comments say
+  populated presentation nodes are owned by a downstream workflow-presentation
+  server. This makes `WorkflowRunDetail` a legitimate dashboard-owned view model,
+  not a weaker duplicate of an existing supervisor projection.
+- Gas City's feed projection can recover a formula name from the root bead's
+  `ref` before falling back to `gc.formula_name`. The workflow snapshot bead row
+  does not expose `ref`, so the dashboard can use `gc.formula`/`gc.formula_name`
+  but still cannot recover formula detail when the only formula identity is root
+  `ref`.
 
 ## Status Model
 
@@ -433,7 +450,7 @@ fixture already has the data needed to address them.
 External constraints and future ownership:
 
 - Formula detail/preview improves ordering, but the dashboard still carries a
-  local TypeScript approximation of workflow presentation semantics that should
+  local TypeScript projection of workflow presentation semantics that should
   eventually be owned by Gas City or shared with Gasworks.
 - Runtime bead overlay is complete for city-store workflows, but rig-store
   workflows depend on the embedded snapshot because the current supervisor API
@@ -446,7 +463,7 @@ External constraints and future ownership:
 ## Gas City And Shared Change Tracker
 
 These are the changes outside this repository that would move the architecture
-from dashboard-owned approximation to the target boundary:
+from dashboard-owned projection to an even cleaner target boundary:
 
 1. **Canonical graph.v2 presentation package.** Gas City or a shared package
    should own semantic node ids, construct kinds, external display names,
@@ -454,28 +471,36 @@ from dashboard-owned approximation to the target boundary:
    visible graph nodes, logical edges, scope groups, and compiled display order.
    The dashboard should consume that shape instead of deriving it from bead
    metadata in TypeScript.
-2. **Scoped runtime bead reads or fresh scoped snapshots.** The supervisor
+2. **Formula identity in workflow snapshots.** Gas City already knows the root
+   bead `ref` and uses it as the first-choice formula name in feed projections,
+   but `WorkflowBeadResponse` does not expose `ref`. Expose root `ref`, a typed
+   `formula_name`, or equivalent on `WorkflowSnapshotResponse` so dashboard
+   formula-detail lookup does not depend on optional metadata.
+3. **Scoped runtime bead reads or fresh scoped snapshots.** The supervisor
    should expose rig-store bead reads or guarantee that scoped workflow
    snapshots include current runtime status for non-city stores.
-3. **OpenAPI schema alignment.** The supervisor OpenAPI schema should match
+4. **OpenAPI schema alignment.** The supervisor OpenAPI schema should match
    observed payloads, especially nullable `Bead.priority`, so dashboard schema
    overlays can be removed.
-4. **Optional canonical execution-instance fields.** Existing metadata is
+5. **Optional canonical execution-instance fields.** Existing metadata is
    sufficient for the current detail page, but a canonical upstream/shared
    presentation shape could expose execution instance ids, semantic node ids,
    loop iteration, retry attempt, current/historical flags, and attached
    session identity directly so the dashboard no longer derives them.
 
-Items that are not current supervisor API gaps after validating the Gasworks
-implementation:
+Items that are not current supervisor API gaps after validating the Gas City and
+Gasworks implementations:
 
 - Workflow/root identity for projection invalidation is available from
   top-level workflow data or bead metadata `gc.workflow_id`/`gc.root_bead_id`;
   events without identity still fall back to broad refresh.
-- Session identity is available through `session_id`/`session_name` and
-  `gc.session_id`/`gc.session_name`.
+- Session identity is usable through `session_id`/`session_name`, current
+  session summaries, and t3bridge `gc.sessionName`; the dashboard also accepts
+  downstream/Gasworks `gc.session_id`/`gc.session_name`.
 - Formula detail target selection can use root-bead `gc.run_target`,
-  `gc.routed_to`, or assignee; no local formula-file parsing is required.
+  `gc.routed_to`, or assignee; no local formula-file parsing is required. The
+  remaining formula gap is identity exposure when only root `ref` knows the
+  formula name.
 - Logical grouping, loop scope, retry attempts, and hidden-control targeting
   have usable metadata sources: `gc.logical_bead_id`, `gc.step_ref`,
   `gc.scope_ref`, `gc.control_for`, `gc.iteration`, `gc.attempt`, and

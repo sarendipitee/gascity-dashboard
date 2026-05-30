@@ -103,7 +103,9 @@ async function getWorkflowFormulaDetail(
   scope: { scopeKind: WorkflowScopeKind; scopeRef: string },
 ): Promise<WorkflowFormulaDetailLookup> {
   const root = raw.beads?.find((bead) => nonEmpty(bead.id) === raw.root_bead_id);
-  const formula = root ? meta(root, 'gc.formula') : undefined;
+  const formula = root
+    ? meta(root, 'gc.formula') ?? meta(root, 'gc.formula_name')
+    : undefined;
   const target = root
     ? meta(root, 'gc.run_target') ?? meta(root, 'gc.routed_to') ?? nonEmpty(root.assignee)
     : undefined;

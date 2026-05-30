@@ -311,6 +311,39 @@ describe('workflows detail route', () => {
     }
   });
 
+  test('fetches formula detail when the root exposes Gas City gc.formula_name metadata', async () => {
+    const snapshot = graphV2Snapshot();
+    const root = snapshot.beads?.find((bead) => bead.id === 'gc-root');
+    assert.ok(root);
+    delete root.metadata['gc.formula'];
+    root.metadata['gc.formula_name'] = 'mol-adopt-pr-v2';
+
+    fake.setHandler((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      if (respondFormulaDetail(req, res)) return;
+      if (req.url === '/v0/city/racoon-city/sessions') {
+        res.end(JSON.stringify({ items: [], total: 0 }));
+        return;
+      }
+      res.end(JSON.stringify(snapshot));
+    });
+    const { url, close } = await startApp(buildApp(fake.baseUrl));
+    try {
+      const res = await fetch(`${url}/api/workflows/gc-root?scope_kind=city&scope_ref=racoon-city`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.deepEqual(body.formula, { kind: 'known', name: 'mol-adopt-pr-v2' });
+      assert.ok(
+        fake.requests.some((request) =>
+          request.startsWith('/v0/city/racoon-city/formulas/mol-adopt-pr-v2?'),
+        ),
+        `expected formula detail request, got: ${fake.requests.join(', ')}`,
+      );
+    } finally {
+      await close();
+    }
+  });
+
   test('rejects invalid workflow ids before calling supervisor', async () => {
     const { url, close } = await startApp(buildApp(fake.baseUrl));
     try {

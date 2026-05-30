@@ -47,11 +47,13 @@ export function workflowSessionLinkFor(
   const sessionId =
     meta(bead, 'session_id') ??
     meta(bead, 'gc.session_id') ??
+    meta(bead, 'gc.sessionId') ??
     supervisorSessionIdFrom(assignee) ??
     assignee;
   const sessionName =
     meta(bead, 'session_name') ??
     meta(bead, 'gc.session_name') ??
+    meta(bead, 'gc.sessionName') ??
     assignee ??
     sessionId;
   if (!sessionId && !sessionName) return undefined;

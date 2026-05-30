@@ -61,6 +61,35 @@ describe('workflow session link resolution', () => {
     );
   });
 
+  test('resolves t3bridge gc.sessionName metadata through the session index', () => {
+    const index = buildWorkflowSessionIndex([
+      session({
+        id: 'gc-session-crew',
+        alias: 'crew',
+        session_name: 't3code--crew',
+        title: 'Crew runtime',
+      }),
+    ]);
+
+    assert.deepEqual(
+      workflowSessionLinkFor(
+        workflowBead({
+          assignee: 't3code/crew',
+          metadata: {
+            'gc.sessionName': 't3code--crew',
+          },
+        }),
+        'active',
+        { sessionIndex: index },
+      ),
+      {
+        sessionId: 'gc-session-crew',
+        sessionName: 'crew',
+        assignee: 't3code/crew',
+      },
+    );
+  });
+
   test('ignores legacy rig metadata aliases', () => {
     const link = workflowSessionLinkFor(
       workflowBead({

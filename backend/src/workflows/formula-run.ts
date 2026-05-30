@@ -152,7 +152,7 @@ export function buildRunningFormulaRun(
 }
 
 function workflowFormula(root: GcWorkflowBead): string | null {
-  return meta(root, 'gc.formula') ?? null;
+  return meta(root, 'gc.formula') ?? meta(root, 'gc.formula_name') ?? null;
 }
 
 function workflowFormulaState(

@@ -373,6 +373,24 @@ describe('workflow presentation enrichment fixtures', () => {
       reason: 'missing_formula_metadata',
     });
   });
+
+  test('uses Gas City gc.formula_name metadata when gc.formula is absent', () => {
+    const snapshot = formulaOrderGraphSnapshot({
+      deps: [],
+      logical_edges: [],
+    });
+    const root = snapshot.beads?.find((bead) => bead.id === 'gc-root');
+    assert.ok(root);
+    root.metadata = {
+      'gc.kind': 'workflow',
+      'gc.formula_contract': 'graph.v2',
+      'gc.formula_name': 'mol-test',
+    };
+
+    const detail = enrichWorkflowRun(snapshot, {});
+
+    assert.deepEqual(detail.formula, { kind: 'known', name: 'mol-test' });
+  });
 });
 
 function findNode(detail: WorkflowRunDetail, id: string): WorkflowDisplayNode {

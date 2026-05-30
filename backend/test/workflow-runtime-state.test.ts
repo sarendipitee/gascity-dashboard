@@ -16,6 +16,7 @@ describe('workflow runtime state overlay', () => {
           metadata: {
             session_id: 'stale-session',
             session_name: 'stale-session-name',
+            'gc.sessionName': 'stale-camel-session-name',
           },
         }),
       ]),
@@ -25,6 +26,7 @@ describe('workflow runtime state overlay', () => {
           metadata: {
             'gc.session_id': 'gc-live-session',
             'gc.session_name': 'gc-live-session-name',
+            'gc.sessionName': 'live-camel-session-name',
           },
         }),
       ],
@@ -32,6 +34,7 @@ describe('workflow runtime state overlay', () => {
 
     assert.equal(merged.beads?.[0]?.metadata['gc.session_id'], 'gc-live-session');
     assert.equal(merged.beads?.[0]?.metadata['gc.session_name'], 'gc-live-session-name');
+    assert.equal(merged.beads?.[0]?.metadata['gc.sessionName'], 'live-camel-session-name');
   });
 });
 

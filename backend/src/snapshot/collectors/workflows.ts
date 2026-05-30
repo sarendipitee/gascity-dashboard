@@ -719,6 +719,7 @@ function workflowFormula(issues: WorkflowIssue[]): WorkflowLane['formula'] {
   const name =
     metadataString(issues, 'pr_review.workflow_formula') ||
     metadataString(issues, 'gc.formula') ||
+    metadataString(issues, 'gc.formula_name') ||
     issues.map((i) => i.title).find((t) => t.startsWith('mol-')) ||
     null;
   return name === null
