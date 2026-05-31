@@ -135,9 +135,16 @@ export function createCityRuntime(opts: CreateCityRuntimeOptions): CityRuntime {
   router.use('/snapshot', snapshotRouter(snapshotService));
 
   // SSE routes. session-stream + events proxy the supervisor's city-scoped
-  // streams; both read this runtime's gc. Mounted on the same per-city
-  // router so they ride the /api/city/:cityName/ prefix.
-  router.use('/sessions', sessionStreamRouter({ gc }));
+  // streams; both read this runtime's gc. Mounted on the per-city router so
+  // they ride the /api/city/:cityName/ prefix.
+  //
+  // The session SSE stream lives under its OWN `/session-stream` prefix
+  // rather than re-using `/sessions` (sessionsRouter above). Two routers on
+  // one prefix made the surface ambiguous — a reader could not tell from the
+  // mount which router owned `/sessions/:id/stream`. A distinct prefix makes
+  // the stream endpoint's owner explicit; the frontend's
+  // `api.sessionStreamUrl` targets `/session-stream/:id/stream` to match.
+  router.use('/session-stream', sessionStreamRouter({ gc }));
   router.use('/events', eventsRouter({ gc }));
 
   return {

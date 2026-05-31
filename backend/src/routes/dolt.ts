@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { DoltNomsTrend, DoltNomsUnavailableReason } from 'gas-city-dashboard-shared';
 import { recordAudit } from '../audit.js';
+import { isValidHostPath } from '../lib/hostPath.js';
 import { LOG_COMPONENT, errorMessage, logWarn } from '../logging.js';
 
 // In-memory ring buffer of dolt-noms size samples — 24 h at 10-minute
@@ -58,6 +59,7 @@ export type DoltNomsSampleResult =
   | { kind: 'available'; sample: DoltNomsSample }
   | { kind: 'unavailable'; reason: 'city_path_missing' }
   | { kind: 'unavailable'; reason: 'city_path_not_absolute'; cityPath: string }
+  | { kind: 'unavailable'; reason: 'city_path_unsafe'; cityPath: string }
   | { kind: 'unavailable'; reason: 'noms_directory_missing'; source: string }
   | { kind: 'unavailable'; reason: 'noms_path_not_directory'; source: string };
 
@@ -139,6 +141,12 @@ export async function sampleDoltNomsSize(cityPath: string): Promise<DoltNomsSamp
   if (cityPath.length === 0) return { kind: 'unavailable', reason: 'city_path_missing' };
   if (!path.isAbsolute(cityPath)) {
     return { kind: 'unavailable', reason: 'city_path_not_absolute', cityPath };
+  }
+  // Absolute but still unsafe: a `..` traversal segment (or NUL) would let the
+  // sampler stat outside the city root. Use the shared host-path gate so this
+  // matches exec.ts's `--city` validation exactly.
+  if (!isValidHostPath(cityPath)) {
+    return { kind: 'unavailable', reason: 'city_path_unsafe', cityPath };
   }
   const source = path.join(cityPath, '.dolt', 'noms');
   try {

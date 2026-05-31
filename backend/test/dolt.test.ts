@@ -43,6 +43,25 @@ describe('dolt-noms sampler', () => {
     });
   });
 
+  test('rejects a relative city path as not-absolute (no stat attempt)', async () => {
+    assert.deepEqual(await sampleDoltNomsSize('relative/city'), {
+      kind: 'unavailable',
+      reason: 'city_path_not_absolute',
+      cityPath: 'relative/city',
+    });
+  });
+
+  test('rejects an absolute city path containing a .. traversal segment', async () => {
+    // SHOULD-FIX #6: an absolute path with a `..` segment slipped past the old
+    // isAbsolute()-only guard. It must now be rejected as unsafe, matching
+    // exec.ts's --city validation, before any fs.stat happens.
+    assert.deepEqual(await sampleDoltNomsSize('/srv/cities/../../etc'), {
+      kind: 'unavailable',
+      reason: 'city_path_unsafe',
+      cityPath: '/srv/cities/../../etc',
+    });
+  });
+
   test('keeps sample history per sampler instance', async () => {
     const first = createDoltNomsSampler({
       cityPath: '/city-one',

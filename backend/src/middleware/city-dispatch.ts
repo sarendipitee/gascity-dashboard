@@ -6,6 +6,7 @@ import { GcClient } from '../gc-client.js';
 import { isValidCityName } from '../lib/cityName.js';
 import { LOG_COMPONENT, logWarn } from '../logging.js';
 import {
+  routeInternalError,
   routeUpstreamError,
   routeValidationError,
   writeRouteError,
@@ -48,7 +49,27 @@ export function cityDispatch(registry: CityRegistry) {
       return;
     }
 
-    const result = await registry.resolve(cityName);
+    // `resolve` reports its EXPECTED outcomes (unknown / invalid /
+    // upstream-error) via ResolveResult. An exception here is UNEXPECTED — a
+    // synchronous throw out of runtime construction (CityRuntime.start() or a
+    // module mount). Express 4 does not forward rejected async-middleware
+    // promises to its error handler, so an unhandled rejection would hang the
+    // request. Catch it and surface a 500 instead of leaving the client open.
+    let result: Awaited<ReturnType<typeof registry.resolve>>;
+    try {
+      result = await registry.resolve(cityName);
+    } catch (error) {
+      writeRouteError(
+        res,
+        routeInternalError(error, {
+          component: LOG_COMPONENT.admin,
+          operation: 'city-dispatch resolve',
+          responseError: 'failed to build city runtime',
+          log: logWarn,
+        }),
+      );
+      return;
+    }
     switch (result.kind) {
       case 'ok':
         req.cityRuntime = result.runtime;

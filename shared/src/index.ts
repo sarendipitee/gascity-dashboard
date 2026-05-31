@@ -534,6 +534,7 @@ export interface DoltNomsSample {
 export type DoltNomsUnavailableReason =
   | 'city_path_missing'
   | 'city_path_not_absolute'
+  | 'city_path_unsafe'
   | 'noms_directory_missing'
   | 'noms_path_not_directory'
   | 'sample_failed';

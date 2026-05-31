@@ -219,7 +219,9 @@ export const api = {
     return request('GET', cityPath(`/workflows/${encodeURIComponent(workflowId)}/diff${qs}`));
   },
   sessionStreamUrl(id: string): string {
-    return cityPath(`/sessions/${encodeURIComponent(id)}/stream`);
+    // Distinct from /sessions (REST) — the session SSE stream mounts under
+    // its own /session-stream prefix on the backend (see city/runtime.ts).
+    return cityPath(`/session-stream/${encodeURIComponent(id)}/stream`);
   },
   maintainerTriage(): Promise<MaintainerTriage> {
     return request('GET', cityPath('/maintainer/triage'));

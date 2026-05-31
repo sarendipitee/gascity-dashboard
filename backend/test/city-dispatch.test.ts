@@ -194,6 +194,56 @@ describe('city registry: get-or-create + single-flight', () => {
     assert.equal(second.kind, 'ok');
   });
 
+  test('a throwing start() leaves a registered, stoppable runtime (no leak)', async () => {
+    // MUST-FIX (registry): runtimes.set(...) BEFORE runtime.start() so a
+    // start that throws still leaves a runtime stopAll() can tear down.
+    const rt = fakeRuntime('racoon-city');
+    let started = false;
+    rt.start = () => {
+      started = true;
+      throw new Error('worker boot failed');
+    };
+    const registry = createCityRegistry({
+      config: makeConfig(),
+      listCities: async () => [{ name: 'racoon-city', path: '/host/racoon', running: true }],
+      createRuntime: () => rt,
+    });
+    await assert.rejects(registry.resolve('racoon-city'), /worker boot failed/);
+    assert.equal(started, true);
+    // The half-started runtime is reachable for cleanup.
+    await registry.stopAll();
+    assert.equal(rt.stopped, 1, 'stopAll could tear down the registered runtime');
+  });
+
+  test('the shared build rides no per-caller AbortSignal; both requesters resolve (SHOULD-FIX)', async () => {
+    // Two concurrent first-requests for the same city collapse to ONE shared
+    // build. resolve() deliberately takes no signal, so the shared
+    // construction can never be cancelled by one requester's abort. listCities
+    // must therefore be invoked WITHOUT a signal — proving no per-caller abort
+    // can reach the shared build — and both requesters resolve ok.
+    let listCalls = 0;
+    let sawSignal = false;
+    const registry = createCityRegistry({
+      config: makeConfig(),
+      listCities: async (signal) => {
+        listCalls += 1;
+        if (signal !== undefined) sawSignal = true;
+        await new Promise((r) => setTimeout(r, 25));
+        return [{ name: 'racoon-city', path: '/host/racoon', running: true }];
+      },
+      createRuntime: (d) => fakeRuntime(d.name),
+    });
+
+    const [r1, r2] = await Promise.all([
+      registry.resolve('racoon-city'),
+      registry.resolve('racoon-city'),
+    ]);
+    assert.equal(r1.kind, 'ok');
+    assert.equal(r2.kind, 'ok', 'second requester still resolves');
+    assert.equal(listCalls, 1, 'one shared build for both requesters');
+    assert.equal(sawSignal, false, 'shared build invoked listCities WITHOUT a per-caller signal');
+  });
+
   test('stopAll stops every live runtime', async () => {
     const runtimes: ReturnType<typeof fakeRuntime>[] = [];
     const registry = createCityRegistry({
@@ -293,6 +343,31 @@ describe('city-dispatch middleware', () => {
       assert.equal(res.status, 404);
       const body = (await res.json()) as { kind?: string };
       assert.equal(body.kind, 'unknown-city');
+    });
+  });
+
+  test('a synchronous throw out of runtime build returns 500 (no hang)', async () => {
+    // MUST-FIX: Express 4 does not forward a rejected async-middleware promise
+    // to its error handler. A throw from runtime construction (e.g. start())
+    // must be caught in the middleware and surfaced as 500 — not leave the
+    // request hanging open.
+    const registry = createCityRegistry({
+      config: makeConfig(),
+      listCities: async () => [{ name: 'racoon-city', path: '/host/racoon', running: true }],
+      createRuntime: () => {
+        const rt = fakeRuntime('racoon-city');
+        rt.start = () => {
+          throw new Error('runtime boot exploded');
+        };
+        return rt;
+      },
+    });
+    const app = mountDispatch(registry);
+    await withApp(app, async (url) => {
+      const res = await fetch(`${url}/api/city/racoon-city/whoami`);
+      assert.equal(res.status, 500);
+      const body = (await res.json()) as { kind?: string };
+      assert.equal(body.kind, 'internal');
     });
   });
 

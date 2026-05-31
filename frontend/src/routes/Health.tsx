@@ -243,6 +243,8 @@ function doltUnavailableCopy(
       return 'city path is not configured';
     case 'city_path_not_absolute':
       return 'city path is not absolute';
+    case 'city_path_unsafe':
+      return 'city path is unsafe (contains a traversal segment)';
     case 'noms_directory_missing':
       return '.dolt/noms directory was not found';
     case 'noms_path_not_directory':

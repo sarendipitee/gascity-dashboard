@@ -40,8 +40,10 @@ export type ResolveResult =
 export interface CityRegistry {
   /** Get-or-create the runtime for `cityName`. Concurrent first-requests for
    *  the same city share ONE in-flight construction (memoized promise) so
-   *  exactly one CityRuntime is ever built per city. */
-  resolve(cityName: string, signal?: AbortSignal): Promise<ResolveResult>;
+   *  exactly one CityRuntime is ever built per city. Deliberately takes no
+   *  AbortSignal: the build is shared, so a single caller's cancellation
+   *  must never tear construction down for the other waiters. */
+  resolve(cityName: string): Promise<ResolveResult>;
   /** Stop every live runtime (process shutdown). */
   stopAll(): Promise<void>;
 }
@@ -70,10 +72,17 @@ export function createCityRegistry(opts: CityRegistryOptions): CityRegistry {
   const runtimes = new Map<string, CityRuntime>();
   const building = new Map<string, Promise<ResolveResult>>();
 
-  async function build(cityName: string, signal?: AbortSignal): Promise<ResolveResult> {
+  async function build(cityName: string): Promise<ResolveResult> {
+    // No AbortSignal is threaded here ON PURPOSE. The build is memoized and
+    // SHARED across all concurrent first-requesters for this city (see
+    // resolve()). Honoring the first caller's signal would let that one
+    // requester's abort cancel the build out from under every other waiter
+    // riding the same promise. The build is a single fast /v0/cities lookup;
+    // it runs to completion and the result is shared. Per-request
+    // cancellation lives at the HTTP layer, not in the shared construction.
     let cities: readonly SupervisorCityDescriptor[];
     try {
-      cities = await listCities(signal);
+      cities = await listCities();
     } catch (error) {
       return { kind: 'upstream-error', error };
     }
@@ -82,13 +91,19 @@ export function createCityRegistry(opts: CityRegistryOptions): CityRegistry {
       return { kind: 'unknown' };
     }
     const runtime = createRuntime(descriptor);
-    runtime.start();
+    // Register BEFORE start() so a throwing start leaves a runtime that
+    // stopAll() can still tear down (workers that DID start, the dolt
+    // sampler, etc). If we started first and start() threw, the half-started
+    // runtime would be unreachable and leak. The map entry is the live one;
+    // resolve() returns it on success, and a start() throw propagates to the
+    // caller (city-dispatch maps it to 500).
     runtimes.set(cityName, runtime);
+    runtime.start();
     return { kind: 'ok', runtime };
   }
 
   return {
-    async resolve(cityName, signal): Promise<ResolveResult> {
+    async resolve(cityName): Promise<ResolveResult> {
       // Defensive: the dispatch middleware already rejects invalid names
       // BEFORE calling resolve (so no listCities call happens for a traversal
       // attempt). This guard makes the registry safe to call directly too.
@@ -103,14 +118,15 @@ export function createCityRegistry(opts: CityRegistryOptions): CityRegistry {
 
       // Memoize the in-flight construction so concurrent first-requests for
       // the same city collapse to ONE build (exactly one CityRuntime). The
-      // caller's `signal` does NOT cancel the shared build — it only seeds
-      // the first builder's upstream call; later waiters ride the same
-      // promise. A build failure clears the slot so the next request retries.
+      // caller's `signal` is intentionally NOT threaded into the shared build:
+      // a single requester's abort must not cancel construction out from under
+      // the other waiters riding the same promise. A build failure clears the
+      // slot so the next request retries.
       const existing = building.get(cityName);
       if (existing !== undefined) {
         return await existing;
       }
-      const promise = build(cityName, signal);
+      const promise = build(cityName);
       building.set(cityName, promise);
       try {
         return await promise;
