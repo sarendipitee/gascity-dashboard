@@ -1,7 +1,7 @@
-import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { afterEach, beforeEach, describe, test } from 'node:test';
 import { GcClient } from '../src/gc-client.js';
 
 // Spin up an in-process fake supervisor so we test real timeout / coalescing
@@ -289,20 +289,20 @@ describe('GcClient error handling', () => {
     assert.doesNotMatch(msg, /secret-city/, `message leaked city name: ${msg}`);
   });
 
-  test('uses generated OpenAPI path and query params for workflow lookup', async () => {
+  test('uses generated OpenAPI path and query params for supervisor workflow lookup', async () => {
     let seenUrl = '';
     fake.setHandler((req, res) => {
       seenUrl = req.url ?? '';
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify(validWorkflowSnapshot('wf/one')));
+      res.end(JSON.stringify(validRunSnapshot('wf/one')));
     });
     const gc = new GcClient({
       baseUrl: fake.baseUrl,
       cityName: 'city one',
       defaultTimeoutMs: 5_000,
     });
-    await gc.getWorkflow('wf/one', undefined, {
+    const snapshot = await gc.getRun('wf/one', undefined, {
       scopeKind: 'rig',
       scopeRef: 'rig-a',
     });
@@ -310,6 +310,7 @@ describe('GcClient error handling', () => {
     assert.equal(seen.pathname, '/v0/city/city%20one/workflow/wf%2Fone');
     assert.equal(seen.searchParams.get('scope_kind'), 'rig');
     assert.equal(seen.searchParams.get('scope_ref'), 'rig-a');
+    assert.equal(snapshot.run_id, 'wf/one');
   });
 
   test('fetches health through the generated city-scoped supervisor path', async () => {
@@ -383,6 +384,23 @@ describe('GcClient error handling', () => {
     await assert.rejects(
       () => gc.listSessions(),
       /invalid gc supervisor listSessions payload/i,
+    );
+  });
+
+  test('rejects payloads that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listSessions(),
+      /invalid gc supervisor listSessions payload: payload\.total must be present/i,
     );
   });
 
@@ -1063,6 +1081,23 @@ describe('GcClient error handling', () => {
     );
   });
 
+  test('rejects mail lists that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [validMail('mail-1')] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listMail(),
+      /invalid gc supervisor listMail payload: payload\.total must be present/i,
+    );
+  });
+
   test('rejects malformed event list payloads at the supervisor boundary', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
@@ -1080,7 +1115,24 @@ describe('GcClient error handling', () => {
     );
   });
 
-  test('rejects malformed workflow snapshots at the supervisor boundary', async () => {
+  test('rejects event lists that violate the generated OpenAPI envelope schema', async () => {
+    fake.setHandler((_req, res) => {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ items: [] }));
+    });
+    const gc = new GcClient({
+      baseUrl: fake.baseUrl,
+      cityName: 'test',
+      defaultTimeoutMs: 5_000,
+    });
+    await assert.rejects(
+      () => gc.listEvents(),
+      /invalid gc supervisor listEvents payload: payload\.total must be/i,
+    );
+  });
+
+  test('rejects malformed run snapshots at the supervisor boundary', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 200;
       res.setHeader('content-type', 'application/json');
@@ -1101,8 +1153,8 @@ describe('GcClient error handling', () => {
       defaultTimeoutMs: 5_000,
     });
     await assert.rejects(
-      () => gc.getWorkflow('gc-root'),
-      /invalid gc supervisor getWorkflow payload/i,
+      () => gc.getRun('gc-root'),
+      /invalid gc supervisor getRun payload/i,
     );
   });
 
@@ -1548,6 +1600,34 @@ describe('GcClient.sling', () => {
     assert.equal(out.root_bead_id, 'gc-900');
   });
 
+  // #61 sling wire-field mapping + fix-D: the supervisor emits the JSON
+  // field `workflow_id` on /sling, but SlingResponse was renamed to carry
+  // `run_id`. The decoder must map the wire field onto the renamed property
+  // so the routed run id is NOT silently dropped on the write-edge cast.
+  test('maps the wire field workflow_id onto the renamed run_id property', async () => {
+    fake.setHandler((req, res) => {
+      req.on('data', () => {});
+      req.on('end', () => {
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({
+          root_bead_id: 'gc-901',
+          workflow_id: 'gc-run-7',
+          target: 'mayor',
+          status: 'ok',
+        }));
+      });
+    });
+    const gc = new GcClient({ baseUrl: fake.baseUrl, cityName: 'test-city', defaultTimeoutMs: 5_000 });
+
+    const out = await gc.sling({ target: 'mayor', bead: 'x' });
+
+    assert.equal(out.run_id, 'gc-run-7');
+    assert.equal(out.root_bead_id, 'gc-901');
+    // The decoder must NOT leave the legacy wire key on the typed object.
+    assert.equal((out as Record<string, unknown>).workflow_id, undefined);
+  });
+
   test('non-2xx throws a redacted error (status only, no topology)', async () => {
     fake.setHandler((_req, res) => {
       res.statusCode = 502;
@@ -1616,7 +1696,7 @@ describe('GcClient.updateBead', () => {
     let url: string | undefined;
     fake.setHandler((req, res) => {
       url = req.url;
-      req.on('data', () => {});
+      req.on('data', () => { });
       req.on('end', () => {
         res.statusCode = 200;
         res.setHeader('content-type', 'application/json');
@@ -2183,16 +2263,27 @@ function validBead(id: string) {
   };
 }
 
-function validWorkflowSnapshot(workflowId: string) {
+function validMail(id: string) {
   return {
-    workflow_id: workflowId,
+    id,
+    from: 'stephanie',
+    to: 'agent',
+    subject: id,
+    body: 'body',
+    created_at: '2026-01-01T00:00:00.000Z',
+    read: false,
+  };
+}
+
+function validRunSnapshot(runId: string) {
+  return {
+    workflow_id: runId,
     root_bead_id: 'gc-root',
     root_store_ref: 'city:test',
     resolved_root_store: 'city:test',
     scope_kind: 'city',
     scope_ref: 'test',
     snapshot_version: 1,
-    snapshot_event_seq: null,
     partial: false,
     stores_scanned: [],
     beads: [],

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
+import { HTTP_STATUS } from '../lib/http-status.js';
 
 // Double-submit cookie CSRF for state-changing endpoints. Single-user
 // localhost tool — no shared-secret store, no rotation needed. Token is
@@ -13,6 +14,7 @@ import type { Request, Response, NextFunction } from 'express';
 
 const TOKEN_HEADER = 'x-csrf-token';
 const COOKIE_NAME = 'gascity_admin_csrf';
+const CSRF_COOKIE_MAX_AGE_S = 86_400;
 
 let bootToken: string | null = null;
 
@@ -34,7 +36,7 @@ export function csrfIssueCookie(req: Request, res: Response, next: NextFunction)
   if (req.method === 'GET' || req.method === 'HEAD') {
     res.setHeader(
       'Set-Cookie',
-      `${COOKIE_NAME}=${getCsrfToken()}; Path=/; SameSite=Strict; Max-Age=86400`,
+      `${COOKIE_NAME}=${getCsrfToken()}; Path=/; SameSite=Strict; Max-Age=${CSRF_COOKIE_MAX_AGE_S}`,
     );
   }
   next();
@@ -52,12 +54,12 @@ export function csrfValidate(req: Request, res: Response, next: NextFunction): v
   }
   const headerToken = req.headers[TOKEN_HEADER];
   if (typeof headerToken !== 'string' || headerToken.length === 0) {
-    res.status(403).json({ error: 'Missing CSRF token', kind: 'csrf' });
+    res.status(HTTP_STATUS.forbidden).json({ error: 'Missing CSRF token', kind: 'csrf' });
     return;
   }
   const expected = getCsrfToken();
   if (!timingSafeEqualStr(headerToken, expected)) {
-    res.status(403).json({ error: 'Invalid CSRF token', kind: 'csrf' });
+    res.status(HTTP_STATUS.forbidden).json({ error: 'Invalid CSRF token', kind: 'csrf' });
     return;
   }
   next();

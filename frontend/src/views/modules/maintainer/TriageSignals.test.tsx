@@ -56,7 +56,7 @@ describe('maintainer triage row signals', () => {
     );
 
     const anchor = container.querySelector('a');
-    expect(anchor?.getAttribute('href')).toBe('/workflows/gc-255139?from=triage');
+    expect(anchor?.getAttribute('href')).toBe('/runs/gc-255139?from=triage');
     // States-have-words: the link carries a textual correlate, not color alone.
     expect(container.textContent).toContain('run');
   });

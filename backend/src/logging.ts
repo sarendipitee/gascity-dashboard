@@ -1,3 +1,5 @@
+export { errorMessage } from 'gas-city-dashboard-shared';
+
 export type LogLevel = 'info' | 'warn' | 'error';
 
 export const LOG_COMPONENT = {
@@ -17,7 +19,7 @@ export const LOG_COMPONENT = {
   sessions: 'sessions',
   snapshot: 'snapshot',
   sse: 'sse',
-  workflows: 'workflows',
+  runs: 'runs',
 } as const;
 
 export const LOG_COMPONENTS = Object.values(LOG_COMPONENT);
@@ -34,12 +36,6 @@ export function logWarn(component: LogComponent, message: string): void {
 
 export function logError(component: LogComponent, message: string): void {
   writeLog('error', component, message);
-}
-
-export function errorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  if (typeof error === 'string') return error;
-  return 'unknown error';
 }
 
 /**

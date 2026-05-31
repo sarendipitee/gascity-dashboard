@@ -1,25 +1,25 @@
 import { Router } from 'express';
 import type { GcBead, GcSession } from 'gas-city-dashboard-shared';
 import { GcClient } from '../gc-client.js';
-import { parseRef } from '../links/node-ref.js';
-import { buildRelationIndex } from '../links/relation-index.js';
+import { HTTP_STATUS } from '../lib/http-status.js';
 import { buildLinkView } from '../links/build-link-view.js';
 import { ResolutionRollup } from '../links/instrumentation.js';
+import { parseRef } from '../links/node-ref.js';
+import { buildRelationIndex } from '../links/relation-index.js';
 import { LOG_COMPONENT, errorMessage, logWarn, sanitizeForLog } from '../logging.js';
 import { routeUpstreamError, writeRouteError } from '../route-errors.js';
 
 // GET /api/links/:ref — bead-ID cross-entity linked view (gascity-dashboard-j4x).
 //
 // Resolves any input ref (bead-id, pr/<n>, issue/<n>, session-id,
-// workflow-id) to its bead-id(s), builds the per-snapshot relation index
+// run-id) to its bead-id(s), builds the per-snapshot relation index
 // over the city bead set + session list, and returns a one-hop
 // EntityLinkView. Read-only; no gh fan-out (the bead→PR/issue edges are
 // authoritative numbers, but the PR/issue entities are rendered as honest
 // unresolved rows — PG2 safety valve).
 //
 // GET /api/links/_stats — the R11 rollup endpoint (RK4): per-edge-type
-// resolution rates. Out-of-band / future-use (curl-able); no frontend
-// surface consumes it in this PR.
+// resolution rates for operational inspection.
 
 // The supervisor's working set is ~2139 beads (see GcClient.listBeads), so
 // a 2000 limit silently truncates relations. Fetch comfortably above the
@@ -45,7 +45,7 @@ export function linksRouter(gc: GcClient, opts: LinksRouterOptions = {}): Router
   router.get('/:ref', async (req, res) => {
     const parsed = parseRef(req.params.ref);
     if (!parsed.ok) {
-      res.status(400).json({ error: parsed.error, kind: 'validation' });
+      res.status(HTTP_STATUS.badRequest).json({ error: parsed.error, kind: 'validation' });
       return;
     }
 
@@ -56,9 +56,8 @@ export function linksRouter(gc: GcClient, opts: LinksRouterOptions = {}): Router
       const view = buildLinkView(index, parsed, {
         partial,
         supervisorFetchedAt,
-        // No GitHub source contributes yet (open-only gh fan-out avoided).
-        // The bead→PR/issue numbers resolve to unresolved rows; their
-        // fetchedAt stays null until a real GitHub join lands (R8/OQ#2).
+        // No GitHub source contributes to this view. The bead→PR/issue
+        // numbers resolve to unresolved rows, with fetchedAt left absent.
         githubFetchedAt: null,
         ...(opts.now !== undefined ? { now: opts.now } : {}),
         recorder: rollup.recorder(),
@@ -87,7 +86,7 @@ interface Sources {
 /**
  * Fetch the bead set + session list so a single failed source degrades the
  * view to `partial` rather than collapsing to a 5xx (mirrors
- * routes/workflows.ts). The bead list is the load-bearing source: if it
+ * routes/runs.ts). The bead list is the load-bearing source: if it
  * fails the request errors (no index is possible).
  *
  * Truncation is never silent: if the supervisor reports a `total` larger

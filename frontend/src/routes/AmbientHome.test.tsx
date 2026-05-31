@@ -2,9 +2,9 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type {
   DashboardSnapshot,
-  WorkflowCensus,
-  WorkflowLane,
-  WorkflowLaneHealth,
+  RunCensus,
+  RunLane,
+  RunLaneHealth,
 } from 'gas-city-dashboard-shared';
 import { MemoryRouter } from 'react-router-dom';
 import { api } from '../api/client';
@@ -55,7 +55,7 @@ afterEach(() => {
 
 const mockSnapshot = api.snapshot as Mock;
 
-function knownHealth(overrides: Partial<WorkflowLaneHealth> = {}): WorkflowLaneHealth {
+function knownHealth(overrides: Partial<RunLaneHealth> = {}): RunLaneHealth {
   return {
     phaseConfidence: 'known',
     needsOperator: false,
@@ -71,7 +71,7 @@ function knownHealth(overrides: Partial<WorkflowLaneHealth> = {}): WorkflowLaneH
   };
 }
 
-function inferredHealth(overrides: Partial<WorkflowLaneHealth> = {}): WorkflowLaneHealth {
+function inferredHealth(overrides: Partial<RunLaneHealth> = {}): RunLaneHealth {
   return { ...knownHealth(overrides), phaseConfidence: 'inferred' };
 }
 
@@ -82,10 +82,10 @@ interface LaneFixture {
   scopeKind?: 'city' | 'rig';
   scopeRef?: string;
   updatedAt?: string;
-  health: WorkflowLaneHealth;
+  health: RunLaneHealth;
 }
 
-function lane(f: LaneFixture): WorkflowLane {
+function lane(f: LaneFixture): RunLane {
   return {
     id: f.id,
     title: f.title ?? f.id,
@@ -122,7 +122,7 @@ function lane(f: LaneFixture): WorkflowLane {
   };
 }
 
-const DEFAULT_CENSUS: WorkflowCensus = {
+const DEFAULT_CENSUS: RunCensus = {
   byPhase: {
     intake: 0,
     implementation: 0,
@@ -145,8 +145,8 @@ function envelope({
   workflowsStatus = 'fresh' as 'fresh' | 'fixture' | 'stale',
   generatedAt = '2026-05-29T20:00:00.000Z',
 }: {
-  lanes?: WorkflowLane[];
-  census?: WorkflowCensus;
+  lanes?: RunLane[];
+  census?: RunCensus;
   workflowsStatus?: 'fresh' | 'fixture' | 'stale';
   generatedAt?: string;
 } = {}): DashboardSnapshot {
@@ -163,13 +163,13 @@ function envelope({
       activeAgents: { status: 'unavailable', source: 'city', error: 'unused' },
       maxAgents: { status: 'unavailable', source: 'city', error: 'unused' },
       activeSessions: { status: 'unavailable', source: 'city', error: 'unused' },
-      activeWorkflows: { status: 'available', value: lanes.length },
+      activeRuns: { status: 'available', value: lanes.length },
     },
     sources: {
       city: { source: 'city', status: 'error', error: 'unused' },
       resources: { source: 'resources', status: 'error', error: 'unused' },
-      workflows: {
-        source: 'workflows',
+      runs: {
+        source: 'runs',
         status: workflowsStatus,
         fetchedAt: '2026-05-29T20:00:00.000Z',
         staleAt: '2026-05-29T20:01:00.000Z',
@@ -198,19 +198,19 @@ function envelope({
 
 function workflowsErrorEnvelope(): DashboardSnapshot {
   const e = envelope();
-  e.sources.workflows = {
-    source: 'workflows',
+  e.sources.runs = {
+    source: 'runs',
     status: 'error',
     error: 'workflow source upstream timeout',
   };
   return e;
 }
 
-function censusUnavailableEnvelope(lanes: WorkflowLane[]): DashboardSnapshot {
+function censusUnavailableEnvelope(lanes: RunLane[]): DashboardSnapshot {
   const e = envelope({ lanes });
-  const wf = e.sources.workflows;
+  const wf = e.sources.runs;
   if (wf.status === 'error') throw new Error('test envelope precondition');
-  e.sources.workflows = {
+  e.sources.runs = {
     ...wf,
     data: {
       ...wf.data,
@@ -254,7 +254,7 @@ describe('AmbientHomePage', () => {
       lane({ id: 'b', updatedAt: '2026-05-29T19:59:30.000Z', health: knownHealth() }),
       lane({ id: 'c', updatedAt: '2026-05-29T19:59:30.000Z', health: knownHealth() }),
     ];
-    const census: WorkflowCensus = {
+    const census: RunCensus = {
       ...DEFAULT_CENSUS,
       totalInFlight: 3,
       knownDenominator: 3,
@@ -285,7 +285,7 @@ describe('AmbientHomePage', () => {
       lane({ id: 'b', updatedAt: '2026-05-29T19:59:30.000Z', health: knownHealth() }),
       lane({ id: 'c-inferred', updatedAt: '2026-05-29T19:59:30.000Z', health: inferredHealth() }),
     ];
-    const census: WorkflowCensus = {
+    const census: RunCensus = {
       ...DEFAULT_CENSUS,
       totalInFlight: 3,
       knownDenominator: 2,
@@ -321,7 +321,7 @@ describe('AmbientHomePage', () => {
       updatedAt: '2026-05-29T10:00:00.000Z',
       health: inferredHealth({ thrashingDetected: true }),
     });
-    const census: WorkflowCensus = {
+    const census: RunCensus = {
       ...DEFAULT_CENSUS,
       totalInFlight: 2,
       knownDenominator: 1,
@@ -342,7 +342,7 @@ describe('AmbientHomePage', () => {
     // useParams() will decode it once. Query params are encoded only once
     // by URLSearchParams so the consumer's search.get('node') yields the
     // raw 'review:check/2' — Phase 4 caught a pre-fix double-encode.
-    expect(href).toMatch(/^\/workflows\/stalled%2Fwith%20chars\?/);
+    expect(href).toMatch(/^\/runs\/stalled%2Fwith%20chars\?/);
     expect(href).toContain('node=review%3Acheck%2F2');
     expect(href).toContain('scope_kind=rig');
     expect(href).toContain('scope_ref=gascity');
@@ -366,7 +366,7 @@ describe('AmbientHomePage', () => {
         stuckNode: { status: 'available', id: 'whatever' },
       }),
     });
-    const census: WorkflowCensus = {
+    const census: RunCensus = {
       ...DEFAULT_CENSUS,
       totalInFlight: 1,
       unverifiable: 1,
@@ -401,7 +401,7 @@ describe('AmbientHomePage', () => {
       updatedAt: '2026-05-29T19:59:30.000Z',
       health: knownHealth(),
     });
-    const census: WorkflowCensus = {
+    const census: RunCensus = {
       ...DEFAULT_CENSUS,
       totalInFlight: 2,
       knownDenominator: 2,

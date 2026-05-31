@@ -35,12 +35,13 @@ export interface ModulesConfig {
 export interface AdminConfig {
   /** Listener port. Default 8081, side-by-side with gc dashboard at 8080. */
   port: number;
-  /** Bind host. Default 127.0.0.1; override via HOST env for headless-VM workflows (e.g. HOST=0.0.0.0). */
+  /** Bind host. Always 127.0.0.1 per the local-only security contract. */
   bindHost: string;
   /**
    * Extra hostnames allowed in the Host: header allow-list, on top of the
    * always-present floor ['127.0.0.1','localhost']. CSV via ADMIN_EXTRA_ALLOWED_HOSTS.
-   * Used when bindHost=0.0.0.0 and clients reach the dashboard by LAN name/IP.
+   * Useful for loopback-only reverse proxies or SSH forwarding setups that
+   * preserve a custom Host header.
    */
   extraAllowedHosts: ReadonlyArray<string>;
   /** gc supervisor base URL (no trailing slash). */
@@ -151,7 +152,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AdminConfig {
   }
   return {
     port,
-    bindHost: env.HOST ?? '127.0.0.1',
+    bindHost: parseBindHost(env.HOST),
     extraAllowedHosts,
     gcSupervisorUrl: (env.GC_SUPERVISOR_URL ?? 'http://127.0.0.1:8372').replace(/\/+$/, ''),
     cityName,
@@ -244,6 +245,16 @@ function loadMaintainerModuleConfig(env: NodeJS.ProcessEnv): MaintainerModuleCon
     slice.cachePath = env.MAINTAINER_CACHE_PATH;
   }
   return slice;
+}
+
+function parseBindHost(raw: string | undefined): string {
+  if (raw !== undefined && raw !== '' && raw !== '127.0.0.1') {
+    logWarn(
+      LOG_COMPONENT.admin,
+      `HOST="${raw}" ignored; dashboard backend binds 127.0.0.1 only`,
+    );
+  }
+  return '127.0.0.1';
 }
 
 function parseSlingTarget(envName: string, raw: string | undefined, fallback: string): string {

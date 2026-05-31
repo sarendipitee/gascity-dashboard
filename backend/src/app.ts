@@ -10,6 +10,7 @@ import {
   securityHeaders,
 } from './middleware/security.js';
 import { csrfIssueCookie, csrfValidate, getCsrfToken } from './middleware/csrf.js';
+import { apiErrorHandler } from './middleware/api-error-handler.js';
 import { GcClient } from './gc-client.js';
 import { gitRouter } from './routes/git.js';
 import { buildsRouter } from './routes/builds.js';
@@ -122,6 +123,11 @@ export function createDashboardApp(config: AdminConfig): DashboardApp {
     `multi-city request plane mounted at /api/city/:cityName/* ` +
       `(supervisor=${config.gcSupervisorUrl}, default city=${config.cityName})`,
   );
+
+  // Global API error boundary (from #61): last-resort handler so an
+  // unhandled throw in any /api route returns a structured JSON error
+  // instead of Express's default HTML 500.
+  app.use(apiErrorHandler());
 
   mountFrontend(app, config.frontendDistPath);
 

@@ -1,11 +1,12 @@
-import type { Request, Response, NextFunction } from 'express';
+import type { NextFunction, Request, Response } from 'express';
+import { HTTP_STATUS } from '../lib/http-status.js';
 
 // DNS-rebinding defense + clickjacking defense + content-type lockdown.
 // security_researcher td-wisp-eb0pn — all V0-SHIP-REQUIRED.
 
 // Always-allowed floor. Extra hosts (e.g. LAN names like 'my-vm' or
 // '192.168.1.58') are added at runtime via hostHeaderAllowlistFactory() —
-// see td-9u9im9 for the headless-VM workflow this supports.
+// see td-9u9im9 for the headless-VM run this supports.
 const ALLOWED_HOSTS_FLOOR: ReadonlyArray<string> = ['127.0.0.1', 'localhost'];
 const THEME_BOOT_SCRIPT_HASH =
   "'sha256-UwUdbc/TSVCB3Er6sM8M1BP5Fk3RrQVkswCUvEjf08g='";
@@ -24,7 +25,7 @@ export function hostHeaderAllowlistFactory(extraAllowedHosts: ReadonlyArray<stri
     const host = hostnameOnly(req.headers.host);
     if (host === null || !allowed.has(host)) {
       // 421 Misdirected Request — semantically right for DNS-rebinding.
-      res.status(421).type('text/plain').send('Host not allowed');
+      res.status(HTTP_STATUS.misdirectedRequest).type('text/plain').send('Host not allowed');
       return;
     }
     next();
@@ -51,7 +52,7 @@ export function originCheck(port: number, extraAllowedHosts: ReadonlyArray<strin
     }
     const origin = req.headers.origin;
     if (typeof origin !== 'string' || !allowedOrigins.has(origin)) {
-      res.status(403).type('application/json').send(
+      res.status(HTTP_STATUS.forbidden).type('application/json').send(
         JSON.stringify({ error: 'Origin not allowed', kind: 'origin' }),
       );
       return;
@@ -61,9 +62,8 @@ export function originCheck(port: number, extraAllowedHosts: ReadonlyArray<strin
 }
 
 export function securityHeaders(extraConnectSrc: ReadonlyArray<string> = []) {
-  // SSE flows same-origin via /api/events/stream (gascity-dashboard-iew),
-  // so 'self' covers EventSource. extraConnectSrc is kept for any future
-  // cross-origin needs.
+  // SSE flows same-origin via /api/events/stream, so 'self' covers EventSource.
+  // Extra connect-src values are explicit config, not a wildcard escape hatch.
   const connectSrc = ["'self'", ...extraConnectSrc].join(' ');
   const csp = [
     "default-src 'self'",

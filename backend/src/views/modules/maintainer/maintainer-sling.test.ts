@@ -1,10 +1,10 @@
-import { test, describe, afterEach } from 'node:test';
+import express from 'express';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import type { AddressInfo } from 'node:net';
-import express from 'express';
+import { afterEach, describe, test } from 'node:test';
 // ExecError is still used by the /refresh tests below — that route shells
 // `gh` (execGhIssueList) and maps ExecError kinds to wire codes. The /sling
 // path no longer throws ExecError (it POSTs to the supervisor via GcClient).
@@ -566,7 +566,7 @@ describe('POST /api/maintainer/sling', { concurrency: false }, () => {
 //
 // Successful slings must write the active-slung-state file so the
 // next GET /triage's overlay can move the One Mark + render the
-// inline workflow link. Failed slings must NOT write — slung state
+// inline run link. Failed slings must NOT write — slung state
 // means "agent has the work."
 
 function slungStatePathFor(handle: AppHandle): string {
@@ -695,7 +695,7 @@ describe('POST /api/maintainer/sling — slung-state persistence', { concurrency
     assert.equal(stream.status, 200);
     assert.equal(stream.headers.get('content-type'), 'text/event-stream');
 
-    // Sling. The route's notifyRefresh() should push to all open clients.
+    // Sling. The route's SSE hub should push to all open clients.
     const slingRes = await postJson(`${h.url}/api/maintainer/sling`, {
       kind: 'pr',
       number: 47,

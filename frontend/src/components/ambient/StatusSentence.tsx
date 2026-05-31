@@ -1,4 +1,4 @@
-import type { WorkflowLane } from 'gas-city-dashboard-shared';
+import type { RunLane } from 'gas-city-dashboard-shared';
 
 // gascity-dashboard-kb3 PRD §4 line 2 — "the lean-in read".
 // Body scale, ≤70ch, prose assembled from structured facts:
@@ -22,7 +22,7 @@ export interface StatusSentenceProps {
    * wins) and OMITS this prop entirely when the city is calm — the
    * sentence has no calm rendering (R6 negative-clause floor).
    */
-  topConcern: { lane: WorkflowLane; ageMs: number };
+  topConcern: { lane: RunLane; ageMs: number };
 }
 
 function formatAge(ageMs: number): string {
@@ -34,7 +34,7 @@ function formatAge(ageMs: number): string {
   return `${days}d`;
 }
 
-function deepLinkHref(lane: WorkflowLane): string | null {
+function deepLinkHref(lane: RunLane): string | null {
   // R2: only render the maroon deep-link when the engine actually
   // resolved which node stalled. An 'unavailable' stuckNode means we
   // would deep-link with no ?node= and the L2 page would have no
@@ -56,10 +56,10 @@ function deepLinkHref(lane: WorkflowLane): string | null {
     qs.set('scope_kind', scope.kind);
     qs.set('scope_ref', scope.ref);
   }
-  return `/workflows/${idForPath}?${qs.toString()}`;
+  return `/runs/${idForPath}?${qs.toString()}`;
 }
 
-function laneToken(lane: WorkflowLane): string {
+function laneToken(lane: RunLane): string {
   // Match the LaneCard pattern: both 'available' AND 'label_only'
   // carry a human-readable PR/issue label the operator recognises.
   // Only fall through to the workflow title when neither variant
@@ -68,7 +68,7 @@ function laneToken(lane: WorkflowLane): string {
   return lane.title;
 }
 
-function pickConcernPhrasing(lane: WorkflowLane): string {
+function pickConcernPhrasing(lane: RunLane): string {
   if (lane.health.status === 'available' && lane.health.data.needsOperator) {
     // Grammatically-extensible: the duration clause "for N min" attaches
     // cleanly to "has been waiting on your decision". The earlier

@@ -1,10 +1,10 @@
-import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
 import type {
   CityStatusSummary,
   ResourceSummary,
-  WorkflowSummary,
+  RunSummary,
 } from 'gas-city-dashboard-shared';
 
 import { SourceCache } from '../src/snapshot/cache.js';
@@ -46,7 +46,7 @@ const SAMPLE_CITY: CityStatusSummary = {
   rigs: [],
 };
 
-const SAMPLE_WORKFLOWS: WorkflowSummary = {
+const SAMPLE_RunS: RunSummary = {
   totalActive: 0,
   totalHistorical: 0,
   runCounts: {
@@ -110,10 +110,10 @@ function buildHealthyCaches(): SourceCacheMap {
       ttlMs: 30_000,
       load: async () => SAMPLE_RESOURCES,
     }),
-    workflows: new SourceCache({
-      source: 'workflows',
+    runs: new SourceCache({
+      source: 'runs',
       ttlMs: 60_000,
-      load: async () => SAMPLE_WORKFLOWS,
+      load: async () => SAMPLE_RunS,
     }),
   };
 }
@@ -132,16 +132,17 @@ function sabotageCache(cache: SourceCache<unknown>, message: string): void {
   (cache as unknown as { refresh: () => Promise<unknown> }).refresh = rejector;
 }
 
-function buildService(caches: SourceCacheMap): SnapshotService {
+function buildService(caches: SourceCacheMap, now?: () => Date): SnapshotService {
   return createSnapshotService({
     caches,
-	    config: {
-	      cityName: 'test-city',
-	      cityRoot: '/tmp/test-city',
+    config: {
+      cityName: 'test-city',
+      cityRoot: '/tmp/test-city',
       useFixtures: false,
       enabledModules: null,
       defaultView: null,
     },
+    now,
   });
 }
 
@@ -160,21 +161,21 @@ describe('readSources failure isolation (settle wrapper contract)', () => {
 
     assert.equal(snapshot.sources.resources.status, 'fresh');
     assert.deepEqual(snapshot.sources.resources.data, SAMPLE_RESOURCES);
-    assert.equal(snapshot.sources.workflows.status, 'fresh');
-    assert.deepEqual(snapshot.sources.workflows.data, SAMPLE_WORKFLOWS);
+    assert.equal(snapshot.sources.runs.status, 'fresh');
+    assert.deepEqual(snapshot.sources.runs.data, SAMPLE_RunS);
   });
 
   test('every cache rejecting still resolves with a fully-shaped envelope (no thrown promise)', async () => {
     const caches = buildHealthyCaches();
     sabotageCache(caches.city as SourceCache<unknown>, 'city down');
     sabotageCache(caches.resources as SourceCache<unknown>, 'resources down');
-    sabotageCache(caches.workflows as SourceCache<unknown>, 'workflows down');
+    sabotageCache(caches.runs as SourceCache<unknown>, 'runs down');
 
     const service = buildService(caches);
 
     const snapshot = await service.getSnapshot();
 
-    for (const name of ['city', 'resources', 'workflows'] as const) {
+    for (const name of ['city', 'resources', 'runs'] as const) {
       assert.equal(snapshot.sources[name].status, 'error', `${name} should be status=error`);
       assert.equal('data' in snapshot.sources[name], false, `${name} should not expose data`);
       assert.equal(snapshot.sources[name].source, name, `${name} envelope should carry source name`);
@@ -222,5 +223,31 @@ describe('readSources failure isolation (settle wrapper contract)', () => {
       !snapshot.sources.resources.error?.includes(leakyPath),
       'raw OS path must not leak to the wire even when the catch fires outside refreshUnshared',
     );
+  });
+
+  test('snapshot service bookkeeping is per instance', async () => {
+    const first = buildService(
+      buildHealthyCaches(),
+      () => new Date('2026-05-24T01:00:00.000Z'),
+    );
+    const second = buildService(
+      buildHealthyCaches(),
+      () => new Date('2026-05-24T02:00:00.000Z'),
+    );
+
+    assert.equal(first.health().lastSnapshotAt, null);
+    assert.equal(second.health().lastSnapshotAt, null);
+
+    await first.getSnapshot();
+
+    assert.equal(first.health().lastSnapshotAt, '2026-05-24T01:00:00.000Z');
+    assert.equal(second.health().lastSnapshotAt, null);
+
+    await second.refresh(['resources']);
+
+    assert.equal(first.health().lastSnapshotAt, '2026-05-24T01:00:00.000Z');
+    assert.equal(first.health().lastRefreshAt, null);
+    assert.equal(second.health().lastSnapshotAt, '2026-05-24T02:00:00.000Z');
+    assert.equal(second.health().lastRefreshAt, '2026-05-24T02:00:00.000Z');
   });
 });

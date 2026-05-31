@@ -18,8 +18,8 @@ export {
   matchesSessionTarget,
   lastSegment,
 } from './session-resolve.js';
-export * from './workflow-detail.js';
-export type * from './workflow-snapshot.js';
+export * from './run-detail.js';
+export type * from './run-snapshot.js';
 export * from './links.js';
 export * from './city.js';
 export type * from './views.js';
@@ -32,6 +32,29 @@ export type * from './gc-client-types.js';
 
 // BeadId stays here — it's not part of the gc-client subset.
 export type BeadId = string;
+
+export const OPERATOR_DISPLAY_ALIAS = 'stephanie';
+export const OPERATOR_WIRE_ALIAS = 'human';
+
+export const GC_EVENT_PREFIX = {
+  bead: 'bead.',
+  session: 'session.',
+} as const;
+
+export interface ClientErrorReport {
+  readonly component: string;
+  readonly operation: string;
+  readonly message: string;
+}
+
+export type SlingIntent = 'review' | 'draft' | 'triage';
+export type SlingKind = 'pr' | 'issue';
+
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  return 'unknown error';
+}
 
 // ── Sessions ──────────────────────────────────────────────────────────────
 // GcSession, GcSessionState, GcSessionList moved to ./gc-client-types.ts
@@ -518,13 +541,13 @@ export interface SupervisorHealth {
 
 export type SupervisorHealthState =
   | {
-      status: 'available';
-      data: SupervisorHealth;
-    }
+    status: 'available';
+    data: SupervisorHealth;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
 /**
  * Dolt store on-disk health, as reported under `store_health` by the
@@ -557,17 +580,17 @@ export type DoltNomsUnavailableReason =
 
 export type DoltNomsTrend =
   | {
-      available: true;
-      /** Up to 144 samples (24 h at 10-min cadence). */
-      samples: DoltNomsSample[];
-      source: string;
-    }
+    available: true;
+    /** Up to 144 samples (24 h at 10-min cadence). */
+    samples: DoltNomsSample[];
+    source: string;
+  }
   | {
-      available: false;
-      /** Historical samples, if the source became unavailable after sampling. */
-      samples: DoltNomsSample[];
-      reason: DoltNomsUnavailableReason;
-    };
+    available: false;
+    /** Historical samples, if the source became unavailable after sampling. */
+    samples: DoltNomsSample[];
+    reason: DoltNomsUnavailableReason;
+  };
 
 // ── Events (SSE; Phase C wires; type-locked early) ──────────────────────
 
@@ -1100,11 +1123,11 @@ export interface MaintainerTriage {
 /** Audit row written to .gc/events.jsonl on every privileged action. */
 export interface AdminAuditEvent {
   type:
-    | 'dashboard.exec'
-    | 'dashboard.fetch'
-    | 'dashboard.send_mail'
-    | 'dashboard.sling'
-    | string;
+  | 'dashboard.exec'
+  | 'dashboard.fetch'
+  | 'dashboard.send_mail'
+  | 'dashboard.sling'
+  | string;
   endpoint: string;
   actor: 'stephanie';
   /** Identity the parent was viewing AS at the time. NEVER affects sender. */

@@ -1,8 +1,8 @@
-import { test, describe } from 'node:test';
-import assert from 'node:assert/strict';
 import type { SourceAvailableState, SourceState } from 'gas-city-dashboard-shared';
+import assert from 'node:assert/strict';
+import { describe, test } from 'node:test';
 
-import { SourceCache, errorMessage } from '../src/snapshot/cache.js';
+import { SourceCache } from '../src/snapshot/cache.js';
 
 // Read-side cache primitive ported from demo-dash for the snapshot series
 // (gascity-dashboard-glw). Six required cases per the bead SCOPE:
@@ -96,7 +96,7 @@ describe('SourceCache', () => {
     let nowMs = Date.parse('2026-05-22T12:00:00.000Z');
     const loads: Array<'success' | 'failure'> = ['success', 'failure'];
     const cache = new SourceCache({
-      source: 'workflows',
+      source: 'runs',
       ttlMs: 1_000,
       now: () => new Date(nowMs),
       load: async () => {
@@ -150,7 +150,7 @@ describe('SourceCache', () => {
 
   test('never-fetched + load() throws → synthetic error state without pretend data', async () => {
     const cache = new SourceCache({
-      source: 'workflows',
+      source: 'runs',
       ttlMs: 1_000,
       load: async () => {
         throw new Error('upstream offline');
@@ -161,7 +161,7 @@ describe('SourceCache', () => {
     });
 
     const state = await cache.get();
-    assert.equal(state.source, 'workflows');
+    assert.equal(state.source, 'runs');
     assert.equal(state.status, 'error');
     assert.equal(state.error, 'upstream offline');
     assert.equal('data' in state, false);
@@ -312,18 +312,6 @@ function assertSourceAvailable<T>(
   assert.notEqual(state.status, 'error');
 }
 
-describe('errorMessage', () => {
-  test('returns message for Error instances', () => {
-    assert.equal(errorMessage(new Error('boom')), 'boom');
-  });
-
-  test('falls back to String() for non-Error values', () => {
-    assert.equal(errorMessage('plain string'), 'plain string');
-    assert.equal(errorMessage(42), '42');
-    assert.equal(errorMessage(null), 'null');
-  });
-});
-
 describe('SourceCache error sanitization (gascity-dashboard-fhj, gascity-dashboard-4r5)', () => {
   // The wire-shape SourceState.error is served to the browser via
   // GET /api/snapshot. For collectors that hit local OS resources
@@ -382,9 +370,9 @@ describe('SourceCache error sanitization (gascity-dashboard-fhj, gascity-dashboa
   test('default-on uses the source name in the generic message', async () => {
     // Pin the message shape so the contract is observable from outside
     // the cache module (the route layer surfaces this to the operator).
-    const cases: Array<{ source: 'city' | 'workflows' | 'resources'; expected: string }> = [
+    const cases: Array<{ source: 'city' | 'runs' | 'resources'; expected: string }> = [
       { source: 'city', expected: 'city collection failed' },
-      { source: 'workflows', expected: 'workflows collection failed' },
+      { source: 'runs', expected: 'runs collection failed' },
       { source: 'resources', expected: 'resources collection failed' },
     ];
 

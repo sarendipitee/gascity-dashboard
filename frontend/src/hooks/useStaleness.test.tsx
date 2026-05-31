@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { WorkflowLane, WorkflowLaneHealth } from 'gas-city-dashboard-shared';
+import type { RunLane, RunLaneHealth } from 'gas-city-dashboard-shared';
 import { NowProvider } from '../contexts/NowContext';
 import {
   STALENESS_TIER_MS,
@@ -25,8 +25,8 @@ afterEach(() => {
 function laneFixture(overrides: {
   id: string;
   updatedAt?: string | { error: string };
-  health: WorkflowLaneHealth | { error: string };
-}): WorkflowLane {
+  health: RunLaneHealth | { error: string };
+}): RunLane {
   const health =
     'error' in overrides.health
       ? ({ status: 'unavailable', error: overrides.health.error } as const)
@@ -56,7 +56,7 @@ function laneFixture(overrides: {
   };
 }
 
-function knownHealth(sessionLastActive?: string): WorkflowLaneHealth {
+function knownHealth(sessionLastActive?: string): RunLaneHealth {
   return {
     phaseConfidence: 'known',
     needsOperator: false,
@@ -74,7 +74,7 @@ function knownHealth(sessionLastActive?: string): WorkflowLaneHealth {
   };
 }
 
-function inferredHealth(sessionLastActive?: string): WorkflowLaneHealth {
+function inferredHealth(sessionLastActive?: string): RunLaneHealth {
   return { ...knownHealth(sessionLastActive), phaseConfidence: 'inferred' };
 }
 
@@ -84,7 +84,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <NowProvider intervalMs={1000}>{children}</NowProvider>;
 }
 
-function renderStaleness(lanes: WorkflowLane[]) {
+function renderStaleness(lanes: RunLane[]) {
   return renderHook(() => useStaleness(lanes), { wrapper });
 }
 

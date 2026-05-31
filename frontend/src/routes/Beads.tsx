@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { GcBead } from 'gas-city-dashboard-shared';
+import { GC_EVENT_PREFIX, type GcBead } from 'gas-city-dashboard-shared';
 import { api, ApiClientError } from '../api/client';
 import { BeadDetailModal } from '../components/BeadDetailModal';
 import { Button } from '../components/Button';
@@ -14,6 +14,7 @@ import { useCachedData } from '../hooks/useCachedData';
 import { useGcEventRefresh } from '../hooks/useGcEvents';
 import { useListFilters, type FilterChip } from '../hooks/useListFilters';
 import { beadProject } from '../hooks/projectOf';
+import { formatDate } from '../lib/format';
 
 const BEAD_CHIPS: ReadonlyArray<FilterChip<GcBead>> = [
   { id: 'open', label: 'open', match: (b) => b.status === 'open' },
@@ -61,7 +62,7 @@ export function BeadsPage() {
     chips: BEAD_CHIPS,
   });
 
-  useGcEventRefresh(['bead.'], () => void refresh());
+  useGcEventRefresh([GC_EVENT_PREFIX.bead], () => void refresh());
 
   const runAction = useCallback(
     async (
@@ -414,16 +415,4 @@ function buildSynopsis(filtered: ReadonlyArray<GcBead>, totalShown: number, labe
   let s = parts.join(', ') + '.';
   if (totalShown > filtered.length) s += ` Showing ${filtered.length} of ${totalShown}.`;
   return s;
-}
-
-function formatDate(iso: string | undefined): string {
-  if (!iso) return '·';
-  const ms = Date.parse(iso);
-  if (!Number.isFinite(ms)) return '·';
-  return new Date(ms).toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }

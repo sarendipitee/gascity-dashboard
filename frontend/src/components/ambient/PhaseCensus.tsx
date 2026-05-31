@@ -1,4 +1,4 @@
-import type { WorkflowCensus } from 'gas-city-dashboard-shared';
+import type { RunCensus } from 'gas-city-dashboard-shared';
 
 // gascity-dashboard-kb3 PRD §4 line 1 — "the <1s pattern-match target".
 // Headline scale, tabular figures, interpunct separators. Deterministic
@@ -17,7 +17,7 @@ import type { WorkflowCensus } from 'gas-city-dashboard-shared';
 // silently scoped (PRD §12 R5).
 
 export interface PhaseCensusProps {
-  census: WorkflowCensus;
+  census: RunCensus;
   waitingCount: number;
   failingCount: number;
 }

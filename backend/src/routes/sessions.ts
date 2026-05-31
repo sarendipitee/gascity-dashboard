@@ -64,7 +64,7 @@ export function sessionsRouter(
 
   router.get('/', async (_req, res) => {
     try {
-      const { items } = await raceWithTimeout(gc.listSessions(), sessionsTimeoutMs);
+      const { items } = await raceWithTimeout(gc.listSessions(), sessionsTimeoutMs, 'sessions route');
       res.json({ items });
     } catch (err) {
       writeRouteError(res, routeUpstreamError(err, {

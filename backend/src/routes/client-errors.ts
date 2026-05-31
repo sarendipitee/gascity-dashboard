@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import type { ClientErrorReport } from 'gas-city-dashboard-shared';
+import { HTTP_STATUS } from '../lib/http-status.js';
 import type { LogComponent } from '../logging.js';
 import { LOG_COMPONENT, logWarn } from '../logging.js';
 import {
@@ -9,12 +11,6 @@ import {
 
 interface ClientErrorsRouterOptions {
   log?: (component: LogComponent, message: string) => void;
-}
-
-interface ClientErrorEvent {
-  component: string;
-  operation: string;
-  message: string;
 }
 
 const MAX_FIELD_LENGTH = 240;
@@ -62,7 +58,7 @@ export function clientErrorsRouter(opts: ClientErrorsRouterOptions = {}): Router
     try {
       const { component, operation, message } = parsed.event;
       log(LOG_COMPONENT.client, `${component} ${operation}: ${message}`);
-      res.status(202).json({ ok: true });
+      res.status(HTTP_STATUS.accepted).json({ ok: true });
     } catch (err) {
       writeRouteError(res, routeInternalError(err, {
         component: LOG_COMPONENT.client,
@@ -76,7 +72,7 @@ export function clientErrorsRouter(opts: ClientErrorsRouterOptions = {}): Router
 }
 
 type ParseClientErrorEventResult =
-  | { status: 'valid'; event: ClientErrorEvent }
+  | { status: 'valid'; event: ClientErrorReport }
   | { status: 'invalid'; error: string };
 
 function parseClientErrorEvent(body: unknown): ParseClientErrorEventResult {

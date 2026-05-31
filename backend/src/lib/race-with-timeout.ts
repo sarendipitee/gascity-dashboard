@@ -13,18 +13,28 @@
 // the socket on completion, and single-flight coalescing means concurrent
 // callers (e.g. the snapshot collector) still benefit from the same fetch.
 
-/** Race a Promise against a TimeoutError-named rejection after `ms` ms. */
-export function raceWithTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/**
+ * Race a Promise against a TimeoutError-named rejection after `ms` ms.
+ *
+ * `operation` is woven into the error message so the 504 surfaced to the
+ * operator names which call timed out; it defaults to a generic label for
+ * callers that don't need the distinction.
+ */
+export function raceWithTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  operation = 'operation',
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      const err = new Error(`operation timed out after ${ms}ms`);
+      const err = new Error(`${operation} timed out after ${ms}ms`);
       err.name = 'TimeoutError';
       reject(err);
     }, ms);
     // Match the rest of the backend (worker.ts, dolt.ts, server.ts): an
     // unref'd timer doesn't block graceful shutdown on SIGTERM.
     timer.unref();
-    p.then(
+    promise.then(
       (value) => {
         clearTimeout(timer);
         resolve(value);

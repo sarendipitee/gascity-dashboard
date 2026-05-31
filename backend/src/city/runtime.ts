@@ -13,7 +13,7 @@ import { sessionsRouter } from '../routes/sessions.js';
 import { sessionStreamRouter } from '../routes/session-stream.js';
 import { agentsRouter } from '../routes/agents.js';
 import { beadsRouter } from '../routes/beads.js';
-import { workflowsRouter } from '../routes/workflows.js';
+import { runsRouter } from '../routes/runs.js';
 import { linksRouter } from '../routes/links.js';
 import { mailRouter } from '../routes/mail.js';
 import { mailSendRouter } from '../routes/mail-send.js';
@@ -112,7 +112,7 @@ export function createCityRuntime(opts: CreateCityRuntimeOptions): CityRuntime {
   // and not a git repo — injecting it made runs with no worktree metadata render
   // the misleading "Execution folder is not a git work tree" instead of the
   // honest "Execution folder is unknown for this run."
-  router.use('/workflows', workflowsRouter(gc));
+  router.use('/runs', runsRouter(gc));
   router.use('/links', linksRouter(gc));
   router.use('/agents', agentsRouter({ cityPath, gc }));
   router.use('/beads', beadsRouter(gc, cityPath));

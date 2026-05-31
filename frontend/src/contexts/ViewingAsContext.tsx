@@ -8,7 +8,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { ViewingAs } from 'gas-city-dashboard-shared';
+import {
+  errorMessage,
+  OPERATOR_DISPLAY_ALIAS,
+  OPERATOR_WIRE_ALIAS as SHARED_OPERATOR_WIRE_ALIAS,
+  type ViewingAs,
+} from 'gas-city-dashboard-shared';
 import { api } from '../api/client';
 import { prioritizeAliases, type AliasBucket } from '../hooks/aliasPriority';
 import {
@@ -16,6 +21,7 @@ import {
   removeBrowserStorage,
   writeBrowserStorage,
 } from '../lib/browserStorage';
+import { reportClientError } from '../lib/clientErrorReporting';
 
 // Identity-switching for mail:
 //
@@ -40,12 +46,12 @@ import {
 
 const STORAGE_KEY = 'gascity.dashboard.viewingAs';
 const COMPONENT = 'ViewingAsContext';
-const OPERATOR = 'stephanie';
+const OPERATOR = OPERATOR_DISPLAY_ALIAS;
 // gc's wire identity for the operator (mail is addressed to/from `human`,
 // not `stephanie` — see backend exec.ts and routes/mail.ts). The agent
 // panel hides this from the switchable list so it doesn't read as a second
 // inbox distinct from the operator's own.
-const OPERATOR_WIRE = 'human';
+const OPERATOR_WIRE = SHARED_OPERATOR_WIRE_ALIAS;
 const ALIAS_RE = /^[a-z][a-z0-9_./-]{1,63}$/i;
 
 // Bounded retry schedule for /api/sessions (gascity-dashboard-5gg).
@@ -188,7 +194,12 @@ export function ViewingAsProvider({ children }: { children: ReactNode }) {
       // it back so the Mail footnote disappears (gascity-dashboard-5gg).
       setSessionsUnavailable(false);
       return true;
-    } catch {
+    } catch (err) {
+      void reportClientError({
+        component: COMPONENT,
+        operation: 'loadAliases.sessions',
+        message: errorMessage(err),
+      });
       return false;
     }
   }, []);
@@ -212,11 +223,12 @@ export function ViewingAsProvider({ children }: { children: ReactNode }) {
             if (!mountedRef.current) return;
             if (!ok) scheduleSessionsRetry(attemptIndex + 1);
           })
-          .catch(() => {
-            // attemptSessionsFetch swallows its own rejections, but guard
-            // the .then() callback so a synchronous throw inside
-            // scheduleSessionsRetry can't surface as an unhandled
-            // promise rejection.
+          .catch((err) => {
+            void reportClientError({
+              component: COMPONENT,
+              operation: 'loadAliases.sessionsRetry',
+              message: errorMessage(err),
+            });
           });
       }, delay);
     },
@@ -283,8 +295,12 @@ export function ViewingAsProvider({ children }: { children: ReactNode }) {
         }
         setMailFromOrTo(out);
       })
-      .catch(() => {
-        /* mail corpus unavailable — falls back to sessions + operator */
+      .catch((err) => {
+        void reportClientError({
+          component: COMPONENT,
+          operation: 'loadAliases.mail',
+          message: errorMessage(err),
+        });
       })
       .finally(settleOne);
   }, [attemptSessionsFetch, scheduleSessionsRetry]);

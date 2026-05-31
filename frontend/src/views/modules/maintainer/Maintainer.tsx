@@ -387,10 +387,10 @@ export function MaintainerPage() {
             </Button>
             {needsYouMode && (
               <Link
-                to="/workflows"
+                to="/runs"
                 className="text-body text-fg-muted normal-case tracking-normal hover:text-fg focus-mark"
               >
-                ↗ workflows
+                ↗ runs
               </Link>
             )}
             {needsYouMode && (

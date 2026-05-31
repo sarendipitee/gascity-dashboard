@@ -91,7 +91,7 @@ export async function writeSlungEntry(
     const nextState: SlungStateMap = { ...current, [key]: entry };
     await persistAtomic(statePath, nextState);
   });
-  writeChain = next.catch(() => undefined);
+  keepWriteChainAlive(next, 'write');
   await next;
 }
 
@@ -110,8 +110,19 @@ export async function purgeSlungKeys(
     const nextState: SlungStateMap = Object.fromEntries(filteredEntries);
     await persistAtomic(statePath, nextState);
   });
-  writeChain = next.catch(() => undefined);
+  keepWriteChainAlive(next, 'purge');
   await next;
+}
+
+// gascity-dashboard: the serialized write chain must survive a failed
+// write/purge so the NEXT enqueued op still runs, but a swallowed
+// `.catch(() => undefined)` hides a persistence failure entirely. Log the
+// failure instead — the chain stays alive AND the operator sees that the
+// slung-state write did not land.
+function keepWriteChainAlive(next: Promise<void>, operation: 'write' | 'purge'): void {
+  writeChain = next.catch((err: unknown) => {
+    logWarn(LOG_COMPONENT.maintainer, `slung-state ${operation} failed: ${errorMessage(err)}`);
+  });
 }
 
 async function persistAtomic(statePath: string, state: SlungStateMap): Promise<void> {

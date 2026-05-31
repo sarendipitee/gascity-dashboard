@@ -8,8 +8,8 @@ import { AmbientHomePage } from './routes/AmbientHome';
 import { BeadsPage } from './routes/Beads';
 import { MailPage } from './routes/Mail';
 import { ActivityPage } from './routes/Activity';
-import { WorkflowsPage } from './routes/Workflows';
-import { WorkflowRunDetailPage } from './routes/WorkflowRunDetail';
+import { FormulaRunDetailPage } from './routes/FormulaRunDetail';
+import { RunsPage } from './routes/Runs';
 import { NowProvider } from './contexts/NowContext';
 import { ViewingAsProvider } from './contexts/ViewingAsContext';
 import { useCachedData } from './hooks/useCachedData';
@@ -75,11 +75,13 @@ export function App() {
               <Route path="/agents" element={<AgentsPage />} />
               <Route path="/agents/:slug" element={<AgentDetailPage />} />
               <Route path="/beads" element={<BeadsPage />} />
-              <Route path="/workflows" element={<WorkflowsPage />} />
-              <Route path="/workflows/:workflowId" element={<WorkflowRunDetailPage />} />
-              {/* /kanban superseded by /workflows (gascity-dashboard-0t6 + dkb Q3);
-                  redirect preserved so bookmarks keep working. */}
-              <Route path="/kanban" element={<Navigate to="/workflows" replace />} />
+              <Route path="/runs" element={<RunsPage />} />
+              <Route path="/runs/:runId" element={<FormulaRunDetailPage />} />
+              {/* /workflows + /kanban superseded by /runs (gascity-dashboard-0t6
+                  + dkb Q3 + #61 formula-run rename); redirects preserved so
+                  bookmarks keep working. */}
+              <Route path="/workflows" element={<Navigate to="/runs" replace />} />
+              <Route path="/kanban" element={<Navigate to="/runs" replace />} />
               <Route path="/mail" element={<MailPage />} />
               <Route path="/activity" element={<ActivityPage />} />
               {/* Modular-dashboard registry routes, filtered by the

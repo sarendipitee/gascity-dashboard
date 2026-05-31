@@ -5,7 +5,8 @@ import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
 import { StatusBadge, type StatusTone } from '../components/StatusBadge';
 import { useCachedData } from '../hooks/useCachedData';
-import { useVisibleInterval } from '../hooks/useVisibleInterval';
+import { useVisibleRefresh } from '../hooks/useVisibleRefresh';
+import { formatHumanSize } from '../lib/format';
 
 // Health page fetches the two slow paths in parallel through the
 // stale-while-revalidate cache so re-entering this view (or polling
@@ -30,7 +31,7 @@ export function HealthPage() {
   const trend = data?.trend ?? null;
   const hostHealthStatus = health ? hostStatus(health) : undefined;
 
-  useVisibleInterval(() => void refresh(), 30_000);
+  useVisibleRefresh(refresh, 30_000);
 
   return (
     <section>
@@ -95,7 +96,7 @@ export function HealthPage() {
               />
               <Kv
                 label="Memory free"
-                value={`${formatBytes(health.host.free_mem_bytes)} of ${formatBytes(health.host.total_mem_bytes)}`}
+                value={`${formatHumanSize(health.host.free_mem_bytes)} of ${formatHumanSize(health.host.total_mem_bytes)}`}
                 {...(health.host.free_mem_bytes / health.host.total_mem_bytes < 0.1
                   ? { tone: 'warn' as const }
                   : {})}
@@ -108,8 +109,8 @@ export function HealthPage() {
             <KvList>
               <Kv label="PID" value={health.admin.pid.toString()} />
               <Kv label="Uptime" value={formatDuration(health.admin.uptime_sec)} />
-              <Kv label="RSS" value={formatBytes(health.admin.rss_bytes)} />
-              <Kv label="Heap used" value={formatBytes(health.admin.heap_used_bytes)} />
+              <Kv label="RSS" value={formatHumanSize(health.admin.rss_bytes)} />
+              <Kv label="Heap used" value={formatHumanSize(health.admin.heap_used_bytes)} />
               <Kv label="Node" value={health.admin.node_version} />
             </KvList>
           </Section>
@@ -228,8 +229,8 @@ function Sparkline({ samples }: { samples: { ts: string; bytes: number }[] }) {
         />
       </svg>
       <div className="flex items-baseline justify-between text-label uppercase tracking-wider text-fg-muted tnum">
-        <span>min {formatBytes(min)}</span>
-        <span>max {formatBytes(max)}</span>
+        <span>min {formatHumanSize(min)}</span>
+        <span>max {formatHumanSize(max)}</span>
       </div>
     </div>
   );
@@ -283,13 +284,6 @@ function hostStatus(h: SystemHealth): { tone: StatusTone; label: string } | unde
   if (memPct < 0.10) return { tone: 'warn', label: 'memory low' };
   if (h.host.load_avg_1 > h.host.cpu_count * 1.5) return { tone: 'warn', label: 'load high' };
   return undefined;
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function formatDuration(sec: number): string {

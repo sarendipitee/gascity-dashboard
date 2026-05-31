@@ -73,7 +73,7 @@ function classifyTier(item: TriageItem): TriageTier {
  *     mark should move to the next unhandled candidate — gascity-
  *     dashboard-9qs). Loose `!= null` catches stale-cache `undefined`.
  * Everything else (open / approved / needs_review) qualifies because
- * gh's reviewDecision is null on most PRs in this workflow — open
+ * gh's reviewDecision is null on most PRs in this run — open
  * effectively means "in the review queue, not blocked."
  *
  * Page-level uniqueness contract: this predicate identifies *candidates*

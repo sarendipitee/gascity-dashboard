@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { reportClientError } from '../lib/clientErrorReporting';
 import { cityPath } from '../api/cityBase';
 
 // gascity-dashboard-iew: EventSource against the backend's same-origin
@@ -9,6 +10,21 @@ import { cityPath } from '../api/cityBase';
 // URL rides the active city's /api/city/:cityName/events/stream prefix.
 
 export type GcEventConnState = 'connecting' | 'open' | 'degraded' | 'closed';
+export type GcEventEnvelope = {
+  type: string;
+  run_id?: string;
+  root_bead_id?: string;
+  run?: Record<string, unknown>;
+  payload?: Record<string, unknown>;
+  bead?: Record<string, unknown>;
+  root?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export interface GcEventRefreshOptions {
+  matches?: (event: GcEventEnvelope) => boolean;
+}
 
 /**
  * Subscribe to gc events. When an event whose type starts with any of
@@ -18,10 +34,13 @@ export type GcEventConnState = 'connecting' | 'open' | 'degraded' | 'closed';
 export function useGcEventRefresh(
   prefixes: ReadonlyArray<string>,
   onMatch: () => void,
+  options: GcEventRefreshOptions = {},
 ): GcEventConnState {
   const [state, setState] = useState<GcEventConnState>('connecting');
   const onMatchRef = useRef(onMatch);
   onMatchRef.current = onMatch;
+  const matchesRef = useRef(options.matches);
+  matchesRef.current = options.matches;
   // Stable hash of prefixes for the effect dep array.
   const prefixKey = prefixes.join(',');
 
@@ -37,12 +56,23 @@ export function useGcEventRefresh(
   const coalesceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (prefixes.length === 0) {
+      setState('closed');
+      return;
+    }
+
     let es: EventSource | null = null;
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let retryDelayMs = 1_000;
+    let malformedEventReported = false;
 
     const COALESCE_MS = 2_500;
+    const reportMalformedEventOnce = (reason: string) => {
+      if (malformedEventReported) return;
+      malformedEventReported = true;
+      reportMalformedEvent(reason);
+    };
     const fireMatch = () => {
       lastFireRef.current = Date.now();
       onMatchRef.current();
@@ -90,22 +120,30 @@ export function useGcEventRefresh(
       // names them.
       const handleData = (msg: MessageEvent<string>) => {
         if (cancelled) return;
-        let parsed: { type?: string } | null = null;
+        let parsed: unknown = null;
         try {
-          parsed = JSON.parse(msg.data) as { type?: string };
+          parsed = JSON.parse(msg.data);
         } catch {
           setState('degraded');
+          reportMalformedEventOnce('invalid JSON');
           return;
         }
-        const t = parsed?.type;
+        if (!isRecord(parsed)) {
+          setState('degraded');
+          reportMalformedEventOnce('missing string event type');
+          return;
+        }
+        const t = parsed.type;
         if (typeof t !== 'string') {
           setState('degraded');
+          reportMalformedEventOnce('missing string event type');
           return;
         }
         setState('open');
         for (const prefix of prefixes) {
           if (t.startsWith(prefix)) {
-            scheduleMatch();
+            const event = parsed as GcEventEnvelope;
+            if (matchesRef.current?.(event) ?? true) scheduleMatch();
             break;
           }
         }
@@ -141,4 +179,16 @@ export function useGcEventRefresh(
   }, [prefixKey]);
 
   return state;
+}
+
+function reportMalformedEvent(reason: string): void {
+  void reportClientError({
+    component: 'gc-events',
+    operation: 'parse event',
+    message: `Malformed gc event payload: ${reason}.`,
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -1,15 +1,20 @@
-import { Router } from 'express';
 import type { Response } from 'express';
-import type { GcBead, BeadUpdateInput } from 'gas-city-dashboard-shared';
-import { GcClient } from '../gc-client.js';
+import { Router } from 'express';
+import {
+  OPERATOR_DISPLAY_ALIAS,
+  type BeadUpdateInput,
+  type GcBead,
+} from 'gas-city-dashboard-shared';
+import { recordAudit } from '../audit.js';
+import type { ExecResult } from '../exec.js';
 import {
   execBeadAction as defaultExecBeadAction,
   ExecError,
 } from '../exec.js';
-import type { ExecResult } from '../exec.js';
-import { recordAudit } from '../audit.js';
-import { toWireExecError } from '../lib/sanitise-error.js';
-import { LOG_COMPONENT, errorMessage, logWarn } from '../logging.js';
+import { GcClient } from '../gc-client.js';
+import { HTTP_STATUS } from '../lib/http-status.js';
+import { writeExecError } from '../lib/sanitise-error.js';
+import { errorMessage, LOG_COMPONENT, logWarn } from '../logging.js';
 import {
   routeInternalError,
   routeUpstreamError,
@@ -60,8 +65,8 @@ interface BeadsRouterOptions {
   /**
    * Injected bead-CLAIM runner (gascity-dashboard-mq2). Production wires
    * `gc.updateBead` (GcClient HTTP `PATCH /bead/{id}`); tests pass a
-   * stub. Replaces the former `execBeadAction(id, 'claim')` subprocess —
-   * the supervisor exposes the write endpoint, so the dashboard adopts it.
+   * stub. The supervisor exposes the write endpoint, so the dashboard
+   * adopts it directly.
    * Mirrors the maintainerRouter.sling DI pattern (gascity-dashboard-mq2).
    */
   updateBead?: (id: string, body: BeadUpdateInput) => Promise<void>;
@@ -115,7 +120,7 @@ export function beadsRouter(
       res.json(bead);
     } catch (err) {
       const msg = (err as Error).message;
-      // Supervisor quirk: workflow/orchestration beads (gc-NNNN ids) are
+      // Supervisor quirk: run/orchestration beads (gc-NNNN ids) are
       // returned by /beads but 404 on /bead/{id}. Fall back to a list scan
       // so the modal works on every bead the user can see in any list.
       // The list call is coalesced by GcClient.getJson, so concurrent
@@ -135,7 +140,7 @@ export function beadsRouter(
           logWarn(LOG_COMPONENT.beads, `/api/beads/:id list fallback failed: ${errorMessage(fallbackErr)}`);
           // fall through to the 404 below
         }
-        res.status(404).json({ error: 'bead not found', kind: 'not_found' });
+        res.status(HTTP_STATUS.notFound).json({ error: 'bead not found', kind: 'not_found' });
         return;
       }
       // gascity-dashboard-ayr: same redaction rationale as the list-beads
@@ -168,24 +173,23 @@ export function beadsRouter(
 }
 
 // Bead CLAIM over HTTP (gascity-dashboard-mq2): PATCH /bead/{id} with
-// {status:'in_progress', assignee:'stephanie'}, replacing the former
-// `gc bd update` subprocess. Error mapping mirrors the maintainer sling
-// handler: a true client-side timeout → 504, any other upstream failure
-// (non-2xx from the supervisor, network error) → 502, with the same
-// toWireInternal500 redaction (only details.name on the wire — the raw
-// message can embed the supervisor URL / host).
+// {status:'in_progress', assignee: OPERATOR_DISPLAY_ALIAS}. Error mapping mirrors the
+// maintainer sling handler: a true client-side timeout → 504, any other
+// upstream failure (non-2xx from the supervisor, network error) → 502,
+// with the same toWireInternal500 redaction (only details.name on the wire —
+// the raw message can embed the supervisor URL / host).
 async function runBeadClaim(
   beadId: string,
   res: Response,
   updateBead: NonNullable<BeadsRouterOptions['updateBead']>,
 ): Promise<void> {
   if (!BEAD_ID_RE.test(beadId)) {
-    res.status(400).json({ error: 'invalid bead id', kind: 'validation' });
+    res.status(HTTP_STATUS.badRequest).json({ error: 'invalid bead id', kind: 'validation' });
     return;
   }
   const startedAt = Date.now();
   try {
-    await updateBead(beadId, { status: 'in_progress', assignee: 'stephanie' });
+    await updateBead(beadId, { status: 'in_progress', assignee: OPERATOR_DISPLAY_ALIAS });
     await recordAudit({
       type: 'dashboard.exec',
       endpoint: 'POST /api/beads/:id/claim',
@@ -246,7 +250,7 @@ async function runBeadAction(
         LOG_COMPONENT.beads,
         `runBeadAction ${action} non-zero exit ${result.exitCode}: ${result.stderr}`,
       );
-      res.status(502).json({
+      res.status(HTTP_STATUS.badGateway).json({
         error: `gc command failed with exit ${result.exitCode}`,
         kind: 'upstream',
         details: { name: 'NonZeroExit' },
@@ -256,18 +260,7 @@ async function runBeadAction(
     res.json({ ok: true, stdout: result.stdout.slice(0, 4096) });
   } catch (err) {
     if (err instanceof ExecError) {
-      const status = err.kind === 'validation' ? 400 : err.kind === 'timeout' ? 504 : 500;
-      // gascity-dashboard-473: the 'spawn' kind wraps node's child_process
-      // "spawn <abs-path> ENOENT" which exposes the operator's binary
-      // layout. validation/timeout carry pre-authored safe strings by
-      // ExecError construction (see backend/src/exec.ts), so they pass
-      // through. journalctl retains the full message via the source-side
-      // ExecError instantiation.
-      if (err.kind === 'spawn') {
-        logWarn(LOG_COMPONENT.beads, `runBeadAction spawn failed: ${err.message}`);
-      }
-      const wire = toWireExecError(err, status);
-      res.status(wire.status).json(wire.body);
+      writeExecError(res, err, LOG_COMPONENT.beads, 'runBeadAction');
       return;
     }
     writeRouteError(res, routeInternalError(err, {

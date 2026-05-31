@@ -1,7 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { CityBootstrap } from './CityBootstrap';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ThemeProvider } from './contexts/ThemeContext';
+import 'react-diff-view/style/index.css';
 import './styles/index.css';
 
 const root = document.getElementById('root');
@@ -14,7 +16,9 @@ if (!root) throw new Error('missing #root');
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <ThemeProvider>
-      <CityBootstrap />
+      <ErrorBoundary>
+        <CityBootstrap />
+      </ErrorBoundary>
     </ThemeProvider>
   </React.StrictMode>,
 );

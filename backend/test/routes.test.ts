@@ -76,13 +76,12 @@ function validSession(id: string) {
   return {
     id,
     template: 'codex',
+    title: id,
+    provider: 'codex',
+    session_name: id,
     state: 'running',
     created_at: '2026-01-01T00:00:00.000Z',
     attached: false,
-    // 6bv7 F10: required per OpenAPI SessionResponse.
-    session_name: id,
-    title: id,
-    provider: 'codex',
     running: true,
   };
 }

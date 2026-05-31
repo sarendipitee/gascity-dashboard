@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import type { AdminAuditEvent } from 'gas-city-dashboard-shared';
+import { OPERATOR_DISPLAY_ALIAS, type AdminAuditEvent } from 'gas-city-dashboard-shared';
 import { LOG_COMPONENT, errorMessage, logError } from './logging.js';
 
 // Audit log writer. Appends one JSON-per-line entry to .gc/events.jsonl —
@@ -18,7 +18,7 @@ export async function recordAudit(
   event: Omit<AdminAuditEvent, 'ts' | 'actor'> & Partial<Pick<AdminAuditEvent, 'actor'>>,
 ): Promise<void> {
   const row: AdminAuditEvent = {
-    actor: 'stephanie',
+    actor: OPERATOR_DISPLAY_ALIAS,
     ts: new Date().toISOString(),
     ...event,
   };

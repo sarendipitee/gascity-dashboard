@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import type { WorkflowLane } from 'gas-city-dashboard-shared';
+import type { RunLane } from 'gas-city-dashboard-shared';
 import { useNow } from '../contexts/NowContext';
 
 // gascity-dashboard-kb3: client-side staleness derivation. The server
@@ -48,7 +48,7 @@ export interface StalenessResult {
   clientStalledLaneIds: readonly string[];
 }
 
-function pickMostRecentFact(lane: WorkflowLane): number | null {
+function pickMostRecentFact(lane: RunLane): number | null {
   const candidates: number[] = [];
   if (lane.updatedAt.status === 'available') {
     const t = Date.parse(lane.updatedAt.at);
@@ -73,7 +73,7 @@ function tierFromAge(ageMs: number): Exclude<StalenessTier, 'unknown'> {
   return 'fresh';
 }
 
-export function useStaleness(lanes: readonly WorkflowLane[]): StalenessResult {
+export function useStaleness(lanes: readonly RunLane[]): StalenessResult {
   const now = useNow();
 
   return useMemo(() => {

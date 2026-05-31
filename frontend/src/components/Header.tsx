@@ -28,7 +28,7 @@ const EXPLICIT_ROUTES: ReadonlyArray<NavRoute> = [
   { to: '/', label: 'Home', end: true, order: 10 },
   { to: '/agents', label: 'Agents', order: 20 },
   { to: '/beads', label: 'Beads', order: 30 },
-  { to: '/workflows', label: 'Workflows', order: 40 },
+  { to: '/runs', label: 'Runs', order: 40 },
   { to: '/mail', label: 'Mail', order: 50 },
   { to: '/activity', label: 'Activity', order: 55 },
 ];
@@ -78,7 +78,7 @@ export function Header() {
 
   return (
     <header className="border-b border-rule">
-      <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-5 flex items-baseline gap-x-6 lg:gap-x-8 gap-y-2 flex-wrap">
+      <div className="max-w-dashboard mx-auto px-4 sm:px-6 lg:px-8 py-5 flex items-baseline gap-x-6 lg:gap-x-8 gap-y-2 flex-wrap">
         <div className="flex items-baseline gap-3 min-w-0">
           <span className="text-title font-semibold tracking-tight text-fg">
             gas city

@@ -1,14 +1,14 @@
 // Read-side telemetry envelope shared across the snapshot series
-// (gascity-dashboard-37u). Ported from demo-dash src/shared/types.ts.
+// (gascity-dashboard-37u).
 //
 // The SourceName union enumerates the sources this dashboard actually serves.
-// Deferred demo-dash sources stay out of the runtime contract until they have
-// real collectors and visible product surface.
+// Sources stay out of the runtime contract until they have real collectors and
+// visible product surface.
 
 export type SourceName =
   | 'city'
   | 'resources'
-  | 'workflows';
+  | 'runs';
 
 export type SourceStatus = 'fresh' | 'stale' | 'error' | 'fixture';
 
@@ -77,26 +77,26 @@ export interface DashboardRuntimeConfig {
 
 export type DashboardMetric =
   | {
-      status: 'available';
-      value: number;
-    }
+    status: 'available';
+    value: number;
+  }
   | {
-      status: 'unavailable';
-      source: SourceName;
-      error: string;
-    };
+    status: 'unavailable';
+    source: SourceName;
+    error: string;
+  };
 
 export interface DashboardHeadline {
   activeAgents: DashboardMetric;
   maxAgents: DashboardMetric;
   activeSessions: DashboardMetric;
-  activeWorkflows: DashboardMetric;
+  activeRuns: DashboardMetric;
 }
 
 export interface DashboardSources {
   city: SourceState<CityStatusSummary>;
   resources: SourceState<ResourceSummary>;
-  workflows: SourceState<WorkflowSummary>;
+  runs: SourceState<RunSummary>;
 }
 
 /**
@@ -109,8 +109,8 @@ export interface DashboardSources {
  */
 export type SourceDataMap = {
   [K in SourceName]: DashboardSources[K] extends SourceState<infer T>
-    ? NonNullable<T>
-    : never;
+  ? NonNullable<T>
+  : never;
 };
 
 // ── city ──────────────────────────────────────────────────────────────────
@@ -190,28 +190,28 @@ export interface ResourceSample {
   memoryUtilization: number;
 }
 
-// ── workflows ─────────────────────────────────────────────────────────────
+// ── runs ─────────────────────────────────────────────────────────────
 
-export interface WorkflowSummary {
+export interface RunSummary {
   /** Count of ACTIVE lanes (`phase !== 'complete'`). Blocked lanes ARE
    *  included — a blocked lane still needs operator attention and is not
-   *  "done". Aligns with `WorkflowCensus.totalInFlight`, which also
-   *  excludes only complete. The headline `activeWorkflows` metric
+   *  "done". Aligns with `RunCensus.totalInFlight`, which also
+   *  excludes only complete. The headline `activeRuns` metric
    *  counts this set (via census when available, this field as fallback). */
   totalActive: number;
   /** Count of HISTORICAL lanes (phase === 'complete'). gascity-dashboard-yh5i:
-   *  /workflows defaults to showing the active set; toggling `?history=1`
+   *  /runs defaults to showing the active set; toggling `?history=1`
    *  reveals the historical section so the user can see recently-completed
    *  runs without complete lanes crowding active out of the 8-cap window. */
   totalHistorical: number;
-  runCounts: WorkflowRunCounts;
+  runCounts: RunCounts;
   /** Active lanes, sorted by compareLanes, capped at MAX_VISIBLE_ACTIVE_LANES. */
-  lanes: WorkflowLane[];
+  lanes: RunLane[];
   /** Historical (phase === 'complete') lanes, sorted by compareLanes, capped at
    *  MAX_VISIBLE_HISTORICAL_LANES. Frontend renders these only when the user
    *  toggles ?history=1; backend always returns the array. */
-  historicalLanes: WorkflowLane[];
-  recentChanges: WorkflowChange[];
+  historicalLanes: RunLane[];
+  recentChanges: RunChange[];
   /**
    * City-level health census (gascity-dashboard-3ax). Threshold-INDEPENDENT
    * counts only — derived once in the backend snapshot read path. The
@@ -220,18 +220,18 @@ export interface WorkflowSummary {
    * 1s selector (kb3), so a server-frozen tier census would under-count for
    * up to the cache TTL on a pure-time stall crossing.
    */
-  census: WorkflowCensusState;
+  census: RunCensusState;
 }
 
-export type WorkflowCensusState =
+export type RunCensusState =
   | {
-      status: 'available';
-      data: WorkflowCensus;
-    }
+    status: 'available';
+    data: RunCensus;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
 /**
  * Threshold-independent city census (gascity-dashboard-3ax, PRD §4 / R5).
@@ -239,9 +239,9 @@ export type WorkflowCensusState =
  * threshold, so freezing it inside the 60s cache TTL is safe. The frontend
  * adds the time-derived "failing / stalled" count on its 1s clock.
  */
-export interface WorkflowCensus {
+export interface RunCensus {
   /** In-flight (non-complete, non-blocked) lane count per phase. */
-  byPhase: Record<WorkflowPhase, number>;
+  byPhase: Record<RunPhase, number>;
   /** Total in-flight lanes (the census denominator base). */
   totalInFlight: number;
   /**
@@ -264,13 +264,13 @@ export interface WorkflowCensus {
   thrashing: number;
 }
 
-export type WorkflowPhaseConfidence = 'known' | 'inferred';
+export type RunPhaseConfidence = 'known' | 'inferred';
 
 /**
  * Per-lane health derived by the backend engine (gascity-dashboard-3ax).
  * R9-strict contract: this carries FACTS and the one server-only signal
  * (`thrashingDetected`), never a frozen staleness-tier enum. The frontend
- * computes the staleness tier + age from `WorkflowLane.updatedAt` (=
+ * computes the staleness tier + age from `RunLane.updatedAt` (=
  * max bead updated_at) and the resolved session's `lastActive` fact on its
  * 1s clock.
  *
@@ -278,14 +278,14 @@ export type WorkflowPhaseConfidence = 'known' | 'inferred';
  * unavailable pre-engine state; the snapshot read path replaces it with these
  * available health facts.
  */
-export interface WorkflowLaneHealth {
+export interface RunLaneHealth {
   /**
    * 'known' iff a formula matched AND the active gc.step_id resolved into a
    * known stage; else 'inferred' (generic fallback / the includes('blocked')
    * sniff). A structural fact about which code path fired (ZFC-clean). An
    * 'inferred' lane must never drive the maroon One Mark (R2/R5).
    */
-  phaseConfidence: WorkflowPhaseConfidence;
+  phaseConfidence: RunPhaseConfidence;
   /**
    * Decision-pending from bead state alone (human-approval gate or blocked).
    * Threshold-independent. The stalled-driven attention signal is added
@@ -297,7 +297,7 @@ export interface WorkflowLaneHealth {
    * `?node=:stuckNodeId` deep link (PRD §5). Unavailable when no active step
    * resolved.
    */
-  stuckNode: WorkflowLaneStuckNode;
+  stuckNode: RunLaneStuckNode;
   /**
    * R1 progress-monotonicity: attempt-of-active-step climbed while the
    * lane's graph position (active stage) stayed flat across cache
@@ -312,20 +312,20 @@ export interface WorkflowLaneHealth {
    */
   thrashingDetected: boolean;
   /** Resolved session facts. Unresolved and missing upstream fields are explicit states. */
-  session: WorkflowLaneSessionState;
+  session: RunLaneSessionState;
 }
 
-export type WorkflowLaneHealthState =
+export type RunLaneHealthState =
   | {
-      status: 'available';
-      data: WorkflowLaneHealth;
-    }
+    status: 'available';
+    data: RunLaneHealth;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export interface WorkflowRunCounts {
+export interface RunCounts {
   total: number;
   visible: number;
   prReview: number;
@@ -335,19 +335,19 @@ export interface WorkflowRunCounts {
   other: number;
 }
 
-export interface WorkflowLane {
+export interface RunLane {
   id: string;
   title: string;
-  formula: WorkflowLaneFormula;
-  scope: WorkflowLaneScope;
-  external: WorkflowLaneExternalReference;
-  phase: WorkflowPhase;
+  formula: RunLaneFormula;
+  scope: RunLaneScope;
+  external: RunLaneExternalReference;
+  phase: RunPhase;
   phaseLabel: string;
   statusCounts: Record<string, number>;
   activeAssignees: string[];
-  updatedAt: WorkflowLaneUpdatedAt;
-  stages: WorkflowStage[];
-  progress: WorkflowLaneProgress;
+  updatedAt: RunLaneUpdatedAt;
+  stages: RunStage[];
+  progress: RunLaneProgress;
   /**
    * Provenance fact (gascity-dashboard-3ax): the lane's stages came from a
    * RECOGNISED formula AND the active gc.step_id mapped into one of those
@@ -361,149 +361,149 @@ export interface WorkflowLane {
    * an explicit unavailable pre-engine state; the snapshot read path replaces
    * it with available health facts.
    */
-  health: WorkflowLaneHealthState;
+  health: RunLaneHealthState;
 }
 
-export type WorkflowLaneUpdatedAt =
+export type RunLaneUpdatedAt =
   | {
-      status: 'available';
-      at: string;
-    }
+    status: 'available';
+    at: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneProgress =
+export type RunLaneProgress =
   | {
-      status: 'active_step';
-      /** Raw gc.step_id of the active primary step. */
-      stepId: string;
-      stage: WorkflowLaneStagePosition;
-      attempt: WorkflowLaneStepAttempt;
-    }
+    status: 'active_step';
+    /** Raw gc.step_id of the active primary step. */
+    stepId: string;
+    stage: RunLaneStagePosition;
+    attempt: RunLaneStepAttempt;
+  }
   | {
-      status: 'stage_only';
-      stage: WorkflowLaneStagePosition;
-      error: string;
-    }
+    status: 'stage_only';
+    stage: RunLaneStagePosition;
+    error: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneStagePosition =
+export type RunLaneStagePosition =
   | {
-      status: 'available';
-      index: number;
-      key: string;
-      label: string;
-    }
+    status: 'available';
+    index: number;
+    key: string;
+    label: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneStepAttempt =
+export type RunLaneStepAttempt =
   | {
-      status: 'available';
-      value: number;
-    }
+    status: 'available';
+    value: number;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneStuckNode =
+export type RunLaneStuckNode =
   | {
-      status: 'available';
-      id: string;
-    }
+    status: 'available';
+    id: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneSessionState =
+export type RunLaneSessionState =
   | {
-      status: 'resolved';
-      lastActive: WorkflowLaneSessionLastActive;
-      running: WorkflowLaneSessionRunning;
-      activity: WorkflowLaneSessionActivity;
-    }
+    status: 'resolved';
+    lastActive: RunLaneSessionLastActive;
+    running: RunLaneSessionRunning;
+    activity: RunLaneSessionActivity;
+  }
   | {
-      status: 'unresolved';
-      error: string;
-    };
+    status: 'unresolved';
+    error: string;
+  };
 
-export type WorkflowLaneSessionLastActive =
+export type RunLaneSessionLastActive =
   | {
-      status: 'available';
-      at: string;
-    }
+    status: 'available';
+    at: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneSessionRunning =
+export type RunLaneSessionRunning =
   | {
-      status: 'available';
-      value: boolean;
-    }
+    status: 'available';
+    value: boolean;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneSessionActivity =
+export type RunLaneSessionActivity =
   | {
-      status: 'available';
-      value: string;
-    }
+    status: 'available';
+    value: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneFormula =
+export type RunLaneFormula =
   | {
-      status: 'known';
-      name: string;
-    }
+    status: 'known';
+    name: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneExternalReference =
+export type RunLaneExternalReference =
   | {
-      status: 'available';
-      label: string;
-      url: string;
-    }
+    status: 'available';
+    label: string;
+    url: string;
+  }
   | {
-      status: 'label_only';
-      label: string;
-    }
+    status: 'label_only';
+    label: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowLaneScope =
+export type RunLaneScope =
   | {
-      status: 'available';
-      kind: 'city' | 'rig';
-      ref: string;
-      rootStoreRef: string;
-    }
+    status: 'available';
+    kind: 'city' | 'rig';
+    ref: string;
+    rootStoreRef: string;
+  }
   | {
-      status: 'unavailable';
-      error: string;
-    };
+    status: 'unavailable';
+    error: string;
+  };
 
-export type WorkflowPhase =
+export type RunPhase =
   | 'intake'
   | 'implementation'
   | 'review'
@@ -513,13 +513,13 @@ export type WorkflowPhase =
   | 'complete'
   | 'active';
 
-export interface WorkflowStage {
+export interface RunStage {
   key: string;
   label: string;
   status: 'pending' | 'active' | 'complete' | 'blocked';
 }
 
-export interface WorkflowChange {
+export interface RunChange {
   id: string;
   title: string;
   status: string;

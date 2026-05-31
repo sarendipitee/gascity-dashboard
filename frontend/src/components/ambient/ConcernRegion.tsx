@@ -1,4 +1,4 @@
-import type { WorkflowLane } from 'gas-city-dashboard-shared';
+import type { RunLane } from 'gas-city-dashboard-shared';
 
 // gascity-dashboard-kb3 PRD §4 — "Concern region". Items needing a
 // decision materialize beneath the sentence on the same page via
@@ -11,7 +11,7 @@ import type { WorkflowLane } from 'gas-city-dashboard-shared';
 // concern predicate; this component just renders the result.
 
 export interface ConcernRow {
-  lane: WorkflowLane;
+  lane: RunLane;
   /**
    * Why the row is in the concern region. Drives the per-row copy and
    * (downstream) the inline action affordance set.
@@ -23,14 +23,14 @@ export interface ConcernRegionProps {
   rows: readonly ConcernRow[];
 }
 
-function laneToken(lane: WorkflowLane): string {
+function laneToken(lane: RunLane): string {
   // Match the LaneCard pattern: both 'available' AND 'label_only'
   // carry an operator-recognisable PR/issue label.
   if (lane.external.status !== 'unavailable') return lane.external.label;
   return lane.title;
 }
 
-function rowHref(lane: WorkflowLane): string {
+function rowHref(lane: RunLane): string {
   // Path segments are interpolated into the template-string pathname
   // and need explicit encoding; query params are set via URLSearchParams
   // which percent-encodes its own values — pre-encoding would produce
@@ -44,15 +44,15 @@ function rowHref(lane: WorkflowLane): string {
       qs.set('scope_kind', scope.kind);
       qs.set('scope_ref', scope.ref);
     }
-    return `/workflows/${idForPath}?${qs.toString()}`;
+    return `/runs/${idForPath}?${qs.toString()}`;
   }
   if (scope) {
     const qs = new URLSearchParams();
     qs.set('scope_kind', scope.kind);
     qs.set('scope_ref', scope.ref);
-    return `/workflows/${idForPath}?${qs.toString()}`;
+    return `/runs/${idForPath}?${qs.toString()}`;
   }
-  return `/workflows/${idForPath}`;
+  return `/runs/${idForPath}`;
 }
 
 function reasonLabel(reason: ConcernRow['reason']): string {

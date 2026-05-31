@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import type {
   DashboardSnapshot,
-  WorkflowLane,
-  WorkflowSummary,
+  RunLane,
+  RunSummary,
 } from 'gas-city-dashboard-shared';
 import { api } from '../api/client';
 import { PageHeader } from '../components/PageHeader';
@@ -26,13 +26,13 @@ import { useStaleness, type StalenessResult } from '../hooks/useStaleness';
 // both consume it.
 
 function pickTopConcern(
-  lanes: readonly WorkflowLane[],
+  lanes: readonly RunLane[],
   staleness: StalenessResult,
-): { lane: WorkflowLane; ageMs: number } | undefined {
+): { lane: RunLane; ageMs: number } | undefined {
   // Rank-broken by oldest stall (PRD §4). Server's thrashing-detected
   // lanes outrank time-stalled because thrashing is the freshness-
   // independent server signal — but both already gated to known per R2.
-  const candidates: { lane: WorkflowLane; ageMs: number; priority: number }[] = [];
+  const candidates: { lane: RunLane; ageMs: number; priority: number }[] = [];
   for (const lane of lanes) {
     if (lane.health.status !== 'available') continue;
     const known = lane.health.data.phaseConfidence === 'known';
@@ -51,7 +51,7 @@ function pickTopConcern(
 }
 
 function buildConcernRows(
-  lanes: readonly WorkflowLane[],
+  lanes: readonly RunLane[],
   staleness: StalenessResult,
   topConcernId: string | undefined,
 ): ConcernRow[] {
@@ -86,7 +86,7 @@ function buildConcernRows(
   return rows;
 }
 
-function countWaiting(lanes: readonly WorkflowLane[]): number {
+function countWaiting(lanes: readonly RunLane[]): number {
   // "waiting" census-vocab (Phase 1 architect M4) — operator-decision-pending.
   let count = 0;
   for (const lane of lanes) {
@@ -97,12 +97,12 @@ function countWaiting(lanes: readonly WorkflowLane[]): number {
 
 interface FreshSnapshot {
   snapshot: DashboardSnapshot;
-  summary: WorkflowSummary;
+  summary: RunSummary;
 }
 
 function readFresh(data: DashboardSnapshot | undefined): FreshSnapshot | null {
   if (data === undefined) return null;
-  const wf = data.sources.workflows;
+  const wf = data.sources.runs;
   if (wf.status === 'error') return null;
   return { snapshot: data, summary: wf.data };
 }

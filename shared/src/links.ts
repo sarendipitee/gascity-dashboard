@@ -1,7 +1,7 @@
 // Bead-ID cross-entity linked view (gascity-dashboard-j4x).
 //
 // Wire shapes for the relation index that joins the dashboard's six
-// entity types (beads, workflow runs, sessions, GitHub PRs/issues,
+// entity types (beads, formula runs, sessions, GitHub PRs/issues,
 // formula/order runs) into a single bidirectional, provenance-tagged
 // adjacency view rendered as a typeset "Related" section.
 //
@@ -9,7 +9,7 @@
 // supervisor-provided bead metadata (ZFC-clean: structural inversion of
 // already-extracted fields, no read-time heuristics). The frontend
 // renders the EntityLinkView without recomputing anything — same posture
-// as the maintainer triage envelope and the workflow run detail.
+// as the maintainer triage envelope and the formula run detail.
 
 import type { IsoTimestamp } from './index.js';
 
@@ -21,7 +21,6 @@ import type { IsoTimestamp } from './index.js';
  */
 export type LinkNodeType =
   | 'bead'
-  | 'workflow_run'
   | 'session'
   | 'github_pr'
   | 'github_issue'
@@ -32,11 +31,9 @@ export type LinkNodeType =
  * Provenance tier of an edge, mirroring GitHub's own structured-vs-prose
  * distinction:
  *   - 'supervisor': authoritative bead metadata (parent, molecule, etc.).
- *   - 'external':   structured third-party field (e.g. a future
- *                   closingIssuesReferences swap — R8).
- *   - 'derived':    a value parsed from prose (the `Fixes #N` regex, the
- *                   one ZFC violation; quarantined here so the later swap
- *                   to 'external' is an additive flip).
+ *   - 'external':   structured third-party field.
+ *   - 'derived':    a value parsed from prose (the `Fixes #N` regex),
+ *                   quarantined from authoritative fields.
  */
 export type LinkProvenance = 'supervisor' | 'external' | 'derived';
 
@@ -49,7 +46,7 @@ export interface LinkNodeRef {
   /** Namespaced identity (`<type>:<scope>:<ref>`). Stable for adjacency. */
   key: string;
   type: LinkNodeType;
-  /** Display/route handle (bead id, `pr/<n>`, session id, workflow id). */
+  /** Display/route handle (bead id, `pr/<n>`, session id, run id). */
   ref: string;
 }
 
@@ -99,8 +96,8 @@ export interface LinkEdge {
 
 /**
  * The per-edge-type resolution outcome rollup (R11). Has a named consumer:
- * the Health/Activity register surfaces these rates so deferred link
- * directions are promoted on measured hit-rate, not speculation (RK4).
+ * the Health/Activity register surfaces these rates so candidate link
+ * directions are evaluated on measured hit-rate, not speculation (RK4).
  * Arithmetic aggregation only — no semantic judgement.
  */
 export interface LinkResolutionStat {
@@ -123,7 +120,7 @@ export interface EntityLinkView {
   stats: LinkResolutionStat[];
   /**
    * True when any contributing fetch failed or the focus ref did not
-   * resolve to a known bead — mirrors routes/workflows.ts partial flag.
+   * resolve to a known bead — mirrors routes/runs.ts partial flag.
    */
   partial: boolean;
   /** When the view was assembled (server clock). */
@@ -138,8 +135,8 @@ export interface EntityLinkView {
 /**
  * Build the namespaced, globally-unique node key (RK1 / OQ#1). Bead IDs
  * are unique within a single city today, but keying on
- * `<type>:<scope>:<ref>` future-proofs against rig-scoped collisions where
- * the same bare ID can recur across scopes.
+ * `<type>:<scope>:<ref>` prevents rig-scoped collisions where the same
+ * bare ID can recur across scopes.
  *
  * The PRD specifies `scope_kind:scope_ref:id` to avoid cross-scope
  * collisions. `scope` MUST therefore already encode the bead's scope KIND

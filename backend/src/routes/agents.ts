@@ -6,7 +6,8 @@ import {
 import type { ExecResult } from '../exec.js';
 import { recordAudit } from '../audit.js';
 import { GcClient } from '../gc-client.js';
-import { toWireExecError } from '../lib/sanitise-error.js';
+import { HTTP_STATUS } from '../lib/http-status.js';
+import { writeExecError } from '../lib/sanitise-error.js';
 import { LOG_COMPONENT, logWarn, sanitizeForLog } from '../logging.js';
 import {
   routeInternalError,
@@ -15,9 +16,8 @@ import {
 } from '../route-errors.js';
 
 // gascity-dashboard-vq7: per-agent prompt/directive surface. Read-only.
-// The bead acceptance is explicitly read-only — direct prompt edit via
-// UI is a high-blast-radius action and is filed-for-followup behind a
-// security_researcher review.
+// The bead acceptance is explicitly read-only; direct prompt editing through
+// this dashboard would be a high-blast-radius action.
 //
 // Why a new router instead of folding into /api/sessions: sessions are
 // keyed by id (gc-…/td-…/th-…); agent identity here is the alias
@@ -52,8 +52,7 @@ interface AgentsRouterOptions {
 }
 
 export function agentsRouter(opts: AgentsRouterOptions | string = {}): Router {
-  // Back-compat shim: server.ts historically called agentsRouter(cityPath).
-  // Accept either the legacy string form or the new options object.
+  // Options normalization keeps tests and app wiring on one router factory.
   const normalised: AgentsRouterOptions =
     typeof opts === 'string' ? { cityPath: opts } : opts;
   const cityPath = normalised.cityPath;
@@ -152,12 +151,12 @@ export function agentsRouter(opts: AgentsRouterOptions | string = {}): Router {
           `/api/agents/${alias}/prime non-zero exit ${result.exitCode}: ${stderr}`,
         );
         if (notFound) {
-          res.status(404).json({
+          res.status(HTTP_STATUS.notFound).json({
             error: 'agent not configured',
             kind: 'not_found',
           });
         } else {
-          res.status(502).json({
+          res.status(HTTP_STATUS.badGateway).json({
             error: `gc prime failed with exit ${result.exitCode}`,
             kind: 'upstream',
             details: { name: 'NonZeroExit' },
@@ -179,21 +178,13 @@ export function agentsRouter(opts: AgentsRouterOptions | string = {}): Router {
       // stderr in the audit body (could contain upstream noise or
       // sensitive paths).
       if (err instanceof ExecError) {
-        const status =
-          err.kind === 'validation' ? 400 : err.kind === 'timeout' ? 504 : 500;
         await recordAudit({
           type: 'dashboard.fetch',
           endpoint: 'GET /api/agents/:alias/prime',
           parsed_args: { agent: alias, error_kind: err.kind },
           duration_ms: 0,
         });
-        // gascity-dashboard-473: spawn-arm host path redaction. See
-        // beads.ts / mail-send.ts for rationale.
-        if (err.kind === 'spawn') {
-          logWarn(LOG_COMPONENT.agents, `/api/agents/${alias}/prime spawn failed: ${err.message}`);
-        }
-        const wire = toWireExecError(err, status);
-        res.status(wire.status).json(wire.body);
+        writeExecError(res, err, LOG_COMPONENT.agents, `/api/agents/${alias}/prime`);
         return;
       }
       await recordAudit({

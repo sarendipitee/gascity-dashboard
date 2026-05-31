@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react';
 
+/**
+ * Synchronous visible timer for local UI ticks such as relative-time clocks.
+ * Async refresh work should use `useVisibleRefresh()` or
+ * `useAbortableVisibleRefresh()` instead.
+ */
 export function useVisibleInterval(
   callback: () => void,
   intervalMs: number,

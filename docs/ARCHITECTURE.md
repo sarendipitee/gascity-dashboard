@@ -29,10 +29,10 @@ Current flow:
 
 - `frontend/src/hooks/useGcEvents.ts::useGcEventRefresh(prefixes, onMatch)` opens `EventSource('/api/events/stream')`.
 - `backend/src/routes/events.ts` proxies `/api/events/stream` to `/v0/city/{name}/events/stream`.
-- `frontend/src/hooks/useSessionStream.ts` opens `EventSource('/api/sessions/:id/stream')` only for active selected workflow-node sessions and exposes live/connecting/closed state to the workflow session panel.
+- `frontend/src/hooks/useSessionStream.ts` opens `EventSource('/api/sessions/:id/stream')` only for active selected run-node sessions and exposes live/connecting/closed state to the run session panel.
 - `backend/src/routes/session-stream.ts` proxies that stream to `/v0/city/{name}/session/{id}/stream`.
 - The browser forwards `Last-Event-ID` automatically on reconnect; the backend proxy also accepts explicit `?after=` and forwards the cursor upstream.
-- Agents, Beads, and Workflows subscribe to matching event prefixes and refresh their cached data. Workflows route event-driven refreshes through `/api/snapshot/refresh` so it bypasses the snapshot TTL.
+- Agents, Beads, and Runs subscribe to matching event prefixes and refresh their cached data. Runs route event-driven refreshes through `/api/snapshot/refresh` so it bypasses the snapshot TTL.
 - Belt-and-braces still applies: every panel has a manual Refresh button for the tab-sleep / laptop-close case.
 
 ## Activity + Health (Phase C — ✅ shipped)
@@ -66,7 +66,7 @@ Three load-bearing reasons (per `security_researcher` td-wisp-eb0pn + `senior_de
 
 1. **Adoption-as-symmetry is a smell.** The Services card on the gc dashboard is correctly empty for this city.
 2. **`[[services]]` is underexercised.** Admin dashboard is too operator-critical to be the first adopter of an untested lifecycle primitive.
-3. **Inverted dependency.** gc-managed services restart with the gc-supervisor — but the dashboard is *exactly what the operator wants open when gc is misbehaving*. Dashboard must outlive supervisor outages.
+3. **Inverted dependency.** gc-managed services restart with the gc-supervisor — but the dashboard is _exactly what the operator wants open when gc is misbehaving_. Dashboard must outlive supervisor outages.
 
 systemd is boring, well-understood, and `journalctl`-debuggable. `ExecStartPre` includes a port-in-use check (`senior_developer` gotcha #5). Revisit `[[services]]` in v1+ when it has battle-tested adopters elsewhere.
 
@@ -90,6 +90,36 @@ systemd is boring, well-understood, and `journalctl`-debuggable. `ExecStartPre` 
               └── spawn() → `gc` CLI            — whitelisted writes
 ```
 
+## Stateful Components
+
+This dashboard is a single-node, loopback-only operator tool. Horizontal
+scaling is outside the current product model, but the stateful parts are
+deliberately isolated so a future multi-instance design has clear seams:
+
+- `backend/src/snapshot/cache.ts` owns `SourceCache` instances for the ambient
+  snapshot. Multi-instance deployment would move cache state to Redis or another
+  shared cache with per-source TTLs.
+- `backend/src/maintainer/sse.ts` owns the in-process `Set` of connected
+  maintainer SSE clients. Multi-instance deployment would use a shared event
+  broker so every browser sees refresh events regardless of which process holds
+  its connection.
+- `backend/src/exec-core.ts` owns the subprocess semaphore that caps privileged
+  command concurrency. Multi-instance deployment would need a distributed lock
+  or queue if the cap is meant to apply across processes.
+- `backend/src/maintainer/slung-state.ts` serializes writes through a module
+  write chain around one JSON file. Multi-instance deployment would replace it
+  with a transactional store or a lock-backed file writer.
+- `backend/src/gc-client.ts` owns an in-flight request map for request
+  deduplication inside one Node process. Multi-instance deployment would either
+  accept per-process dedupe or move that cache behind a shared supervisor-aware
+  gateway.
+- `backend/src/middleware/csrf.ts` owns the boot-scoped double-submit token.
+  Multi-instance deployment would need shared token material or sticky sessions.
+
+Timers are lifecycle-managed through the `DashboardRuntime` returned by
+`createDashboardApp()`: the dolt-noms sampler and maintainer refresher start
+and stop with the process wrapper instead of hidden module startup.
+
 ## Trust boundaries
 
 - **Browser ↔ backend**: same-origin, Host-allowlist, Origin check, CSP, CSRF on writes. See `SECURITY.md`.
@@ -100,9 +130,9 @@ systemd is boring, well-understood, and `journalctl`-debuggable. `ExecStartPre` 
 
 Five views ship in three milestones. Each milestone has an acceptance gate:
 
-- **Phase A (this commit)** — skeleton + Agents view + Beads view. *Gate*: the operator can identify any session's state + peek tmux content without a shell; can see filtered beads + claim/close from the browser.
-- **Phase B** — Mail with identity-switching (view-as-X, sends-as-operator via separate router). *Gate*: the operator can read any agent's thread cross-agent; verify every send logs `actor=stephanie`.
-- **Phase C** — Activity (commits + builds) + Health (process + dolt-noms 24 h trend) + SSE wiring. *Gate*: the operator can spot the refinery's last merge + memory pressure trend without terminal.
+- **Phase A (this commit)** — skeleton + Agents view + Beads view. _Gate_: the operator can identify any session's state + peek tmux content without a shell; can see filtered beads + claim/close from the browser.
+- **Phase B** — Mail with identity-switching (view-as-X, sends-as-operator via separate router). _Gate_: the operator can read any agent's thread cross-agent; verify every send logs `actor=stephanie`.
+- **Phase C** — Activity (commits + builds) + Health (process + dolt-noms 24 h trend) + SSE wiring. _Gate_: the operator can spot the refinery's last merge + memory pressure trend without terminal.
 
 Internal tool — the "anti-scope-reduction reflex" doesn't apply here. The five views are loosely coupled; phasing is logical build order, not feature cuts.
 

@@ -1,28 +1,28 @@
 import type {
+  BeadUpdateInput,
   CityList,
   GcAgent,
   GcAgentList,
-  GcSessionList,
   GcBead,
   GcBeadList,
+  GcEventList,
+  GcFormulaDetail,
   GcFormulaRunList,
   GcFormulaRunsResponse,
   GcMailList,
-  GcEventList,
-  GcFormulaDetail,
   GcOrderHistoryDetail,
   GcOrderHistoryList,
   GcOrdersFeedResponse,
   GcRigList,
+  GcRunSnapshot,
+  GcSessionList,
   GcStatus,
-  GcWorkflowSnapshot,
-  SlingInput,
-  SlingResponse,
-  BeadUpdateInput,
   MailSendInput,
   MailSendResponse,
+  RunScopeKind,
+  SlingInput,
+  SlingResponse,
   SupervisorHealth,
-  WorkflowScopeKind,
 } from 'gas-city-dashboard-shared';
 import createClient, { type Client } from 'openapi-fetch';
 import {
@@ -55,8 +55,8 @@ const DEFAULT_TIMEOUT_MS = (() => {
 })();
 
 // Sling does real work upstream (creates a bead, attaches a wisp, dispatches
-// to a rig — ~30s measured on this deployment). 60s gives ~2x headroom,
-// matching the old execGcSling subprocess timeout (gascity-dashboard-mq2).
+// to a rig, roughly 30s measured on this deployment). 60s gives the request
+// enough headroom while still bounding a hung supervisor.
 const SLING_TIMEOUT_MS = 60_000;
 
 const SUPERVISOR_PATHS = {
@@ -283,19 +283,21 @@ export class GcClient {
 
   /**
    * `POST /sling` — auto-creates a bead from `input.bead` text and routes it
-   * to `input.target` (gascity-dashboard-mq2; replaces the `gc sling` CLI
-   * subprocess). The caller reads `root_bead_id` off the response to record
-   * slung-state, in place of the old `^Slung <id>` stdout parse.
+   * to `input.target`. The caller reads `root_bead_id` off the response to
+   * record slung-state.
    */
   async sling(input: SlingInput): Promise<SlingResponse> {
-    return this.writeJson<SlingResponse>('/sling', input, SLING_TIMEOUT_MS);
+    const raw = await this.writeJson<unknown>('/sling', input, SLING_TIMEOUT_MS);
+    // Decode at the write edge: the supervisor emits the wire field
+    // `workflow_id`, which the decoder maps onto the renamed `run_id`
+    // property (#61). A raw cast would silently drop the routed run id.
+    return gcSupervisorDecoders.decodeSling(raw);
   }
 
   /**
-   * `PATCH /bead/{id}` — the bead-CLAIM path (gascity-dashboard-mq2; replaces
-   * `gc bd update --status=in_progress --assignee=stephanie`). PATCH is the
-   * canonical update verb per the supervisor's api-ops-design.md, which marks
-   * the equivalent `POST /bead/{id}/update` deprecated; both take the same
+   * `PATCH /bead/{id}` — the bead-CLAIM path. PATCH is the canonical update
+   * verb per the supervisor's api-ops-design.md; both PATCH and the
+   * supervisor's update action take the same
    * `BeadUpdateBody`. The supervisor returns OKResponseBody{status}; the caller
    * ignores the body (success = 2xx). Unlike sling, this is a fast metadata
    * write, so it uses the read default timeout. Bead CLOSE + agent NUDGE stay
@@ -311,12 +313,10 @@ export class GcClient {
   }
 
   /**
-   * `POST /mail` — operator mail send (gascity-dashboard-mq2; replaces
-   * `gc mail send ... --from human`). The supervisor returns 201 with the
-   * created Message; the caller reads `id` off the response in place of the
-   * old stdout `Sent <id>` parse. Fast write, so it uses the read default
-   * timeout. `from` is pinned to 'human' by the caller (server.ts), never the
-   * browser — the browser-facing shape has no `from` slot.
+   * `POST /mail` — operator mail send. The supervisor returns 201 with the
+   * created Message; the caller reads `id` off the response. Fast write, so it
+   * uses the read default timeout. `from` is pinned to 'human' by the caller,
+   * never the browser; the browser-facing shape has no `from` slot.
    */
   async sendMail(body: MailSendInput): Promise<MailSendResponse> {
     return this.writeJson<MailSendResponse>('/mail', body, this.defaultTimeoutMs);
@@ -564,11 +564,11 @@ export class GcClient {
     );
   }
 
-  async getWorkflow(
-    workflowId: string,
+  async getRun(
+    runId: string,
     signal?: AbortSignal,
-    scope?: { scopeKind: WorkflowScopeKind; scopeRef: string },
-  ): Promise<GcWorkflowSnapshot> {
+    scope?: { scopeKind: RunScopeKind; scopeRef: string },
+  ): Promise<GcRunSnapshot> {
     const query: { scope_kind?: string; scope_ref?: string } = {};
     if (scope !== undefined) {
       query.scope_kind = scope.scopeKind;
@@ -576,14 +576,14 @@ export class GcClient {
     }
     return this.getOperation(
       this.operationKey(SUPERVISOR_PATHS.workflow, [
-        workflowId,
+        runId,
         scope?.scopeKind,
         scope?.scopeRef,
       ]),
-      gcSupervisorDecoders.getWorkflow,
+      gcSupervisorDecoders.getRun,
       (upstreamSignal) => this.supervisor.GET(SUPERVISOR_PATHS.workflow, {
         params: {
-          path: { ...this.cityPathParams(), workflow_id: workflowId },
+          path: { ...this.cityPathParams(), workflow_id: runId },
           query,
         },
         signal: upstreamSignal,
@@ -601,7 +601,7 @@ export class GcClient {
    * per-rig listBeads queries.
    */
   async listFormulaRuns(
-    scope: { scopeKind: WorkflowScopeKind; scopeRef: string },
+    scope: { scopeKind: RunScopeKind; scopeRef: string },
     signal?: AbortSignal,
   ): Promise<GcFormulaRunList> {
     const query = {
@@ -624,7 +624,7 @@ export class GcClient {
 
   async getFormulaDetail(
     formulaName: string,
-    scope: { scopeKind: WorkflowScopeKind; scopeRef: string },
+    scope: { scopeKind: RunScopeKind; scopeRef: string },
     target: string,
     signal?: AbortSignal,
   ): Promise<GcFormulaDetail> {
@@ -677,7 +677,7 @@ export class GcClient {
    */
   async listFormulaRunsByName(
     formulaName: string,
-    scope: { scopeKind: WorkflowScopeKind; scopeRef: string },
+    scope: { scopeKind: RunScopeKind; scopeRef: string },
     options: { limit?: number; signal?: AbortSignal } = {},
   ): Promise<GcFormulaRunsResponse> {
     const query: { scope_kind: string; scope_ref: string; limit?: number } = {
@@ -713,7 +713,7 @@ export class GcClient {
    */
   async listOrdersFeed(
     options: {
-      scope?: { scopeKind: WorkflowScopeKind; scopeRef: string };
+      scope?: { scopeKind: RunScopeKind; scopeRef: string };
       limit?: number;
       signal?: AbortSignal;
     } = {},

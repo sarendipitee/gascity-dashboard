@@ -18,9 +18,9 @@ import type {
   DashboardSnapshot,
   SourceName,
   DashboardRuntimeConfig,
-  WorkflowDiffResponse,
-  WorkflowRunDetail,
-  WorkflowScopeKind,
+  RunDiffResponse,
+  FormulaRunDetail,
+  RunScopeKind,
   EntityLinkView,
 } from 'gas-city-dashboard-shared';
 import { readCsrfToken } from './csrf';
@@ -57,15 +57,29 @@ async function performRequest<T>(
   if (body !== undefined) init.body = JSON.stringify(body);
   const res = await fetch(url, init);
   if (!res.ok) {
-    let payload: ApiError | null = null;
-    try {
-      payload = (await res.json()) as ApiError;
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new ApiClientError(res.status, payload?.error ?? res.statusText, payload?.kind);
+    const bodyText = await res.text();
+    const payload = parseApiErrorBody(bodyText);
+    const message = payload?.error ?? (bodyText.trim() || res.statusText || `HTTP ${res.status}`);
+    throw new ApiClientError(res.status, message, payload?.kind);
   }
   return (await res.json()) as T;
+}
+
+function parseApiErrorBody(bodyText: string): ApiError | undefined {
+  if (bodyText.trim().length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(bodyText) as unknown;
+    return isApiError(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isApiError(value: unknown): value is ApiError {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.error !== 'string') return false;
+  return record.kind === undefined || typeof record.kind === 'string';
 }
 
 // In dev, `tsx watch` restarts the backend on every source edit, which
@@ -194,7 +208,7 @@ export const api = {
   // Bypasses the backend's per-source TTL — POSTs through
   // SnapshotService.refresh which forces a fresh upstream load on the
   // listed sources (or all sources when `sources` is omitted). Used by
-  // the /workflows live-updates path so SSE-triggered re-fetches see
+  // the /runs live-updates path so SSE-triggered re-fetches see
   // genuinely fresh data (gascity-dashboard-bqn).
   snapshotRefresh(sources?: readonly SourceName[]): Promise<DashboardSnapshot> {
     // Backend rejects [] explicitly (snapshot.ts:83 — "sources must not
@@ -204,19 +218,19 @@ export const api = {
     const body = sources && sources.length > 0 ? { sources } : {};
     return request('POST', cityPath('/snapshot/refresh'), body);
   },
-  workflowRun(
-    workflowId: string,
-    params?: { scopeKind?: WorkflowScopeKind; scopeRef?: string },
-  ): Promise<WorkflowRunDetail> {
-    const qs = workflowQuery(params);
-    return request('GET', cityPath(`/workflows/${encodeURIComponent(workflowId)}${qs}`));
+  formulaRun(
+    runId: string,
+    params?: { scopeKind?: RunScopeKind; scopeRef?: string },
+  ): Promise<FormulaRunDetail> {
+    const qs = runQuery(params);
+    return request('GET', cityPath(`/runs/${encodeURIComponent(runId)}${qs}`));
   },
-  workflowDiff(
-    workflowId: string,
-    params?: { scopeKind?: WorkflowScopeKind; scopeRef?: string },
-  ): Promise<WorkflowDiffResponse> {
-    const qs = workflowQuery(params);
-    return request('GET', cityPath(`/workflows/${encodeURIComponent(workflowId)}/diff${qs}`));
+  runDiff(
+    runId: string,
+    params?: { scopeKind?: RunScopeKind; scopeRef?: string },
+  ): Promise<RunDiffResponse> {
+    const qs = runQuery(params);
+    return request('GET', cityPath(`/runs/${encodeURIComponent(runId)}/diff${qs}`));
   },
   sessionStreamUrl(id: string): string {
     // Distinct from /sessions (REST) — the session SSE stream mounts under
@@ -236,7 +250,7 @@ export const api = {
   // action bar fans out one call per selected item via Promise.allSettled
   // so a single 4xx/5xx doesn't block the rest of the batch.
   // Bead-ID cross-entity linked view (gascity-dashboard-j4x). `ref` is a
-  // bead id, `pr/<n>`, `issue/<n>`, a session id, or a workflow id.
+  // bead id, `pr/<n>`, `issue/<n>`, a session id, or a run id.
   entityLinks(ref: string): Promise<EntityLinkView> {
     return request('GET', cityPath(`/links/${encodeURIComponent(ref)}`));
   },
@@ -251,7 +265,7 @@ export const api = {
   },
 };
 
-function workflowQuery(params?: { scopeKind?: WorkflowScopeKind; scopeRef?: string }): string {
+function runQuery(params?: { scopeKind?: RunScopeKind; scopeRef?: string }): string {
   const search = new URLSearchParams();
   if (params?.scopeKind && params.scopeRef) {
     search.set('scope_kind', params.scopeKind);

@@ -96,7 +96,13 @@ export interface SlingInput {
 export interface SlingResponse {
   root_bead_id?: string;
   bead?: string;
-  workflow_id?: string;
+  /**
+   * Renamed from the wire field `workflow_id` (#61 formula-run naming
+   * alignment). The gc supervisor still emits `workflow_id` on the /sling
+   * wire; the decoder (backend/src/gc-supervisor-decoders.ts) maps that wire
+   * field onto this renamed property so parsing does not silently drop it.
+   */
+  run_id?: string;
   target?: string;
   status?: string;
 }

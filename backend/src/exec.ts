@@ -9,7 +9,7 @@ import {
   ExecError,
   MAX_BYTES,
   MAX_BYTES_LARGE,
-  MAX_WORKFLOW_DIFF_BYTES,
+  MAX_RUN_DIFF_BYTES,
   runExec,
   type ExecResult,
 } from './exec-core.js';
@@ -24,7 +24,8 @@ export type { ExecResult };
 // Per security_researcher td-wisp-eb0pn:
 //   - ENUM whitelist of allowed commands.
 //   - shell:false (non-negotiable).
-//   - Clean env — no inherited PATH/HOME/LANG.
+//   - Clean env — no inherited environment; PATH/HOME/LANG are assigned
+//     intentionally by exec-core.
 //   - Timeout (10-30s) + output cap (100KB).
 //   - Concurrency cap (semaphore).
 //   - Bead-id / agent-alias param schemas enforced.
@@ -58,6 +59,22 @@ const CTRL_RE = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 // but they're in the same Unicode bidi-control category — the CVE
 // listed all 12 and a comprehensive strip costs nothing.
 const BIDI_RE = /[؜‎‏‪-‮⁦-⁩]/g;
+const MAX_CLOSE_REASON_LENGTH = 1024;
+const GIT_LOG_RECENT_LIMIT = '200';
+const BEAD_ACTION_TIMEOUT_MS = 15_000;
+const AGENT_PRIME_TIMEOUT_MS = 10_000;
+const GIT_LOG_TIMEOUT_MS = 10_000;
+const RUN_GIT_TIMEOUT_MS = 5_000;
+const GH_LIST_TIMEOUT_MS = 30_000;
+const GH_HISTORY_LIST_TIMEOUT_MS = 60_000;
+const RUN_REVIEWABLE_PATHS = [
+  '--',
+  ':/',
+  ':(exclude,top).beads',
+  ':(exclude,top).beads/**',
+  ':(exclude,top).gc',
+  ':(exclude,top).gc/**',
+];
 
 function sanitiseTerminalOutput(raw: string): string {
   return raw
@@ -69,17 +86,10 @@ function sanitiseTerminalOutput(raw: string): string {
 
 // ── Public exec wrappers — each one is a named, whitelisted call. ──────
 //
-// Note: peek used to be a shell-exec wrapper here. Architect addendum
-// td-wisp-ijk7g (mechanic td-wisp-e1v14) confirmed peek is served by
-// `gc supervisor`'s HTTP API as a structured transcript — see
-// `routes/sessions.ts` + `gc-client.ts::fetchTranscript`.
-
-// Bead CLOSE + agent NUDGE only. CLAIM moved to GcClient.updateBead (HTTP
-// PATCH /bead/{id}) under gascity-dashboard-mq2 — the supervisor
-// exposes that write endpoint. CLOSE stays here because the HTTP
-// `/bead/{id}/close` endpoint has no reason field and the dashboard's
-// close-reason UI would silently lose it; NUDGE stays because no HTTP route
-// exists for it (it's the CLI nudgequeue subsystem).
+// Bead CLOSE + agent NUDGE only. The dashboard uses supervisor HTTP for
+// claim writes, but close still needs the CLI because the HTTP close route
+// does not accept the operator's reason field. Nudge is also CLI-backed
+// because the supervisor has no HTTP route for the nudge queue.
 export async function execBeadAction(
   beadId: string,
   action: 'close' | 'nudge',
@@ -106,7 +116,11 @@ export async function execBeadAction(
   if (action === 'close') {
     args.push('close', beadId);
     if (cityArg) args.push(cityArg);
-    if (typeof reason === 'string' && reason.length > 0 && reason.length <= 1024) {
+    if (
+      typeof reason === 'string' &&
+      reason.length > 0 &&
+      reason.length <= MAX_CLOSE_REASON_LENGTH
+    ) {
       args.push('--reason', reason);
     }
   } else if (action === 'nudge') {
@@ -118,7 +132,7 @@ export async function execBeadAction(
     args.push('nudge', beadId);
     if (cityArg) args.push(cityArg);
   }
-  return runExec('gc', args, 15_000);
+  return runExec('gc', args, BEAD_ACTION_TIMEOUT_MS);
 }
 
 /**
@@ -156,37 +170,32 @@ export async function execAgentPrime(
     args.push(`--city=${cityPath}`);
   }
   args.push(alias);
-  return runExec('gc', args, 10_000);
+  return runExec('gc', args, AGENT_PRIME_TIMEOUT_MS);
 }
 
-// Mail send moved to GcClient.sendMail (HTTP POST /mail with from:'human')
-// under gascity-dashboard-mq2 — the supervisor exposes that write endpoint.
-// The physical-separation guarantee (no `from`/`as` slot reaching the
-// browser) now lives in the browser-facing MailComposeRequest shape +
-// server.ts pinning from:'human'; the route file mail-send.ts still has no
-// identity parameter in its handler.
+// Mail send uses supervisor HTTP with from:'human' pinned server-side.
+// The browser-facing MailComposeRequest carries no `from` or `as` slot,
+// preserving the impersonation boundary in the route contract.
 
 // Hardcoded enum of `git log` invocations. Each view's args live entirely
 // in this file — the operator cannot pass arbitrary git arguments to the
 // server. The caller can only pick a view *name* (validated upstream).
-// td-7t24i6 scope expansion: git log views previously capped at -n 50 in
-// recent-main / recent-all, same undercount risk. Recent-main bumped to
-// 200 (matches main's typical commit frequency * ~2 weeks); recent-all
-// bumped to 200 too. The since= variants are time-windowed, not count-
-// windowed, so no explicit cap needed — git's default for those is fine.
+// Recent views use an explicit count cap sized for roughly two weeks of
+// active main-branch commits. The since= variants are time-windowed, not
+// count-windowed, so git's default result count is the correct limit there.
 const GIT_LOG_VIEWS: Record<string, string[]> = {
   'recent-main': [
     'log',
     '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
     '-n',
-    '200',
+    GIT_LOG_RECENT_LIMIT,
     'origin/main',
   ],
   'recent-all': [
     'log',
     '--pretty=format:%H%x09%h%x09%an%x09%aI%x09%D%x09%s',
     '-n',
-    '200',
+    GIT_LOG_RECENT_LIMIT,
     '--branches',
     '--remotes',
   ],
@@ -213,41 +222,121 @@ export async function execGitLog(view: string): Promise<ExecResult> {
   if (!args) {
     throw new ExecError('unknown git view', 'validation');
   }
-  return runExec('git', ['-C', GIT_REPO_PATH, ...args], 10_000);
+  return runExec('git', ['-C', GIT_REPO_PATH, ...args], GIT_LOG_TIMEOUT_MS);
 }
 
-type WorkflowGitView = 'root' | 'status' | 'diff' | 'diff-cached';
+type RunGitView =
+  | 'root'
+  | 'status'
+  | 'untracked'
+  | 'upstream'
+  | 'merge-base-upstream'
+  | 'diff-head'
+  | 'name-status-head';
 
-const WORKFLOW_GIT_VIEWS: Record<WorkflowGitView, string[]> = {
+const RUN_GIT_VIEWS: Record<RunGitView, string[]> = {
   root: ['rev-parse', '--show-toplevel'],
-  status: ['status', '--porcelain=v1'],
-  diff: ['diff', '--no-ext-diff', '--no-color'],
-  'diff-cached': ['diff', '--cached', '--no-ext-diff', '--no-color'],
+  status: ['status', '--porcelain=v1', '--untracked-files=all', ...RUN_REVIEWABLE_PATHS],
+  untracked: ['ls-files', '--others', '--exclude-standard', '-z'],
+  upstream: ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+  'merge-base-upstream': ['merge-base', 'HEAD', '@{upstream}'],
+  'diff-head': ['diff', '--no-ext-diff', '--no-color', 'HEAD', ...RUN_REVIEWABLE_PATHS],
+  'name-status-head': [
+    'diff',
+    '--name-status',
+    '--no-ext-diff',
+    '--no-color',
+    'HEAD',
+    ...RUN_REVIEWABLE_PATHS,
+  ],
 };
 
 /**
- * Whitelisted git reads for workflow run detail diffs. The execution path
+ * Whitelisted git reads for formula run detail diffs. The execution path
  * comes from supervisor-owned run metadata, not a browser parameter, but it is
  * still validated here so every subprocess boundary remains in this file.
  */
-export async function execWorkflowGit(
+export async function execRunGit(
   cwd: string,
-  view: WorkflowGitView,
+  view: RunGitView,
 ): Promise<ExecResult> {
-  if (!isValidWorkflowCwd(cwd)) {
-    throw new ExecError('invalid workflow cwd', 'validation');
+  if (!isValidRunCwd(cwd)) {
+    throw new ExecError('invalid run cwd', 'validation');
   }
-  const args = WORKFLOW_GIT_VIEWS[view];
+  const args = RUN_GIT_VIEWS[view];
   return runExec(
     'git',
     ['-C', cwd, ...args],
-    5_000,
-    view === 'diff' || view === 'diff-cached' ? MAX_WORKFLOW_DIFF_BYTES : MAX_BYTES,
+    RUN_GIT_TIMEOUT_MS,
+    view === 'diff-head' ? MAX_RUN_DIFF_BYTES : MAX_BYTES,
   );
 }
 
-function isValidWorkflowCwd(cwd: string): boolean {
+export async function execRunGitDiffFrom(
+  cwd: string,
+  baseRevision: string,
+): Promise<ExecResult> {
+  if (!isValidRunCwd(cwd) || !/^[0-9a-f]{40,64}$/i.test(baseRevision)) {
+    throw new ExecError('invalid run git diff args', 'validation');
+  }
+  return runExec(
+    'git',
+    ['-C', cwd, 'diff', '--no-ext-diff', '--no-color', baseRevision, ...RUN_REVIEWABLE_PATHS],
+    RUN_GIT_TIMEOUT_MS,
+    MAX_RUN_DIFF_BYTES,
+  );
+}
+
+export async function execRunGitNameStatusFrom(
+  cwd: string,
+  baseRevision: string,
+): Promise<ExecResult> {
+  if (!isValidRunCwd(cwd) || !/^[0-9a-f]{40,64}$/i.test(baseRevision)) {
+    throw new ExecError('invalid run git name-status args', 'validation');
+  }
+  return runExec(
+    'git',
+    [
+      '-C',
+      cwd,
+      'diff',
+      '--name-status',
+      '--no-ext-diff',
+      '--no-color',
+      baseRevision,
+      ...RUN_REVIEWABLE_PATHS,
+    ],
+    RUN_GIT_TIMEOUT_MS,
+  );
+}
+
+export async function execRunGitNewFileDiff(
+  cwd: string,
+  filePath: string,
+  maxBytes = MAX_RUN_DIFF_BYTES,
+): Promise<ExecResult> {
+  if (!isValidRunCwd(cwd) || !isValidRunRelativePath(filePath)) {
+    throw new ExecError('invalid run git diff path', 'validation');
+  }
+  return runExec(
+    'git',
+    ['-C', cwd, 'diff', '--no-index', '--no-ext-diff', '--no-color', '--', '/dev/null', filePath],
+    RUN_GIT_TIMEOUT_MS,
+    maxBytes,
+  );
+}
+
+function isValidRunCwd(cwd: string): boolean {
   return cwd.startsWith('/') && !cwd.includes('\0') && !cwd.split('/').includes('..');
+}
+
+function isValidRunRelativePath(filePath: string): boolean {
+  return (
+    filePath.length > 0 &&
+    !filePath.startsWith('/') &&
+    !filePath.includes('\0') &&
+    !filePath.split('/').includes('..')
+  );
 }
 
 // ── Maintainer triage: gh CLI wrappers ───────────────────────────────
@@ -305,7 +394,7 @@ export async function execGhIssueList(
       '--limit',
       String(limit),
     ],
-    30_000,
+    GH_LIST_TIMEOUT_MS,
     MAX_BYTES_LARGE,
   );
 }
@@ -341,7 +430,7 @@ export async function execGhIssueListAll(
       '--limit',
       String(limit),
     ],
-    60_000,
+    GH_HISTORY_LIST_TIMEOUT_MS,
     MAX_BYTES_LARGE,
   );
 }
@@ -375,7 +464,7 @@ export async function execGhPrListAll(
       '--limit',
       String(limit),
     ],
-    60_000,
+    GH_HISTORY_LIST_TIMEOUT_MS,
     MAX_BYTES_LARGE,
   );
 }
@@ -407,7 +496,7 @@ export async function execGhPrList(
       '--limit',
       String(limit),
     ],
-    30_000,
+    GH_LIST_TIMEOUT_MS,
     MAX_BYTES_LARGE,
   );
 }

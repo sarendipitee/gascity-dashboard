@@ -17,10 +17,7 @@ const typedConfigs = [
 const typeAwareSourceFiles = [
   'backend/src/**/*.ts',
   'frontend/src/**/*.{ts,tsx}',
-  'shared/src/index.ts',
-  'shared/src/snapshot/**/*.ts',
-  'shared/src/workflow-detail.ts',
-  'shared/src/workflow-snapshot.ts',
+  'shared/src/**/*.ts',
 ];
 
 // Colocated backend test files (PR-B1+) live under backend/src/**/*.test.ts.
@@ -100,7 +97,7 @@ export default tseslint.config(
   },
   {
     files: typeAwareSourceFiles,
-    ignores: backendColocatedTestGlobs,
+    ignores: ['shared/src/**/*.test.ts', ...backendColocatedTestGlobs],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -129,6 +126,7 @@ export default tseslint.config(
           attributes: false,
         },
       }],
+      '@typescript-eslint/switch-exhaustiveness-check': 'error',
       '@typescript-eslint/restrict-template-expressions': ['error', {
         allowBoolean: true,
         allowNumber: true,

@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { sanitiseTerminalOutput } from './exec.js';
 import type {
   CityList,
@@ -15,12 +14,18 @@ import type {
   GcOrderHistoryList,
   GcOrdersFeedResponse,
   GcRigList,
+  GcRunSnapshot,
   GcSessionList,
   GcStatus,
-  GcWorkflowSnapshot,
+  SlingResponse,
   SupervisorHealth,
   TranscriptTurn,
 } from 'gas-city-dashboard-shared';
+import { z } from 'zod';
+import {
+  openApiIssuePath,
+  validateGcSupervisorComponent,
+} from './gc-supervisor-schema-validator.js';
 import type { components } from './generated/gc-supervisor.js';
 
 type RawSupervisorSchema = components['schemas'];
@@ -41,6 +46,10 @@ export interface GcTranscriptResponse {
 }
 
 export type GcDecoder<RawValue, DecodedValue> = (value: RawValue) => DecodedValue;
+
+type GcWorkflowSnapshot = Omit<GcRunSnapshot, 'run_id'> & {
+  workflow_id: string;
+};
 
 const UnknownRecordSchema = z.record(z.string(), z.unknown());
 const StringRecordSchema = z.record(z.string(), z.string());
@@ -223,7 +232,7 @@ const EventSchema = z.object({
   message: z.string().optional(),
 }).passthrough();
 
-const WorkflowBeadSchema = z.object({
+const RunBeadSchema = z.object({
   id: z.string(),
   title: z.string(),
   status: z.string(),
@@ -236,7 +245,7 @@ const WorkflowBeadSchema = z.object({
   metadata: StringRecordSchema,
 }).passthrough();
 
-const WorkflowDepSchema = z.object({
+const RunDepSchema = z.object({
   from: z.string(),
   to: z.string(),
   kind: z.string().optional(),
@@ -270,8 +279,7 @@ const FormulaPreviewEdgeSchema = z.object({
 // {[k: string]: unknown}, defeating the SSOT alignment.
 const EmptyObjectSchema = z.object({});
 
-const WorkflowSnapshotSchema = z.object({
-  workflow_id: z.string(),
+const RunSnapshotBaseSchema = z.object({
   root_bead_id: z.string(),
   root_store_ref: z.string(),
   resolved_root_store: z.string(),
@@ -281,11 +289,15 @@ const WorkflowSnapshotSchema = z.object({
   snapshot_event_seq: z.number().finite().nullable().optional(),
   partial: z.boolean(),
   stores_scanned: z.array(z.string()).nullable(),
-  beads: z.array(WorkflowBeadSchema).nullable(),
-  deps: z.array(WorkflowDepSchema).nullable(),
+  beads: z.array(RunBeadSchema).nullable(),
+  deps: z.array(RunDepSchema).nullable(),
   logical_nodes: z.array(EmptyObjectSchema).nullable(),
-  logical_edges: z.array(WorkflowDepSchema).nullable(),
+  logical_edges: z.array(RunDepSchema).nullable(),
   scope_groups: z.array(EmptyObjectSchema).nullable(),
+}).passthrough();
+
+const WorkflowSnapshotSchema = RunSnapshotBaseSchema.extend({
+  workflow_id: z.string(),
 }).passthrough();
 
 const FormulaDetailSchema = z.object({
@@ -433,6 +445,7 @@ const PartialErrorsField = z.array(z.string())
 export const gcSupervisorDecoders = {
   listSessions(value: RawSupervisorSchema['ListBodySessionResponse']): GcSessionList {
     return decodeSupervisorPayload(
+      'ListBodySessionResponse',
       z.object({
         items: listItemsField(SessionSchema),
         // 6bv7 F14: OpenAPI ListBodySessionResponse declares total required.
@@ -447,6 +460,7 @@ export const gcSupervisorDecoders = {
 
   listRigs(value: RawSupervisorSchema['ListBodyRigResponse']): GcRigList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: listItemsField(RigSchema),
         partial: PartialField,
@@ -459,6 +473,7 @@ export const gcSupervisorDecoders = {
 
   listCities(value: RawSupervisorSchema['SupervisorCitiesOutputBody']): CityList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: listItemsField(CitySchema),
         // SupervisorCitiesOutputBody declares total required.
@@ -481,6 +496,7 @@ export const gcSupervisorDecoders = {
       items: SupervisorCity[];
       total: number;
     }>(
+      null,
       z.object({
         items: listItemsField(SupervisorCitySchema),
         total: z.number().finite(),
@@ -493,6 +509,7 @@ export const gcSupervisorDecoders = {
 
   listAgents(value: RawSupervisorSchema['ListBodyAgentResponse']): GcAgentList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: listItemsField(AgentSchema),
         partial: PartialField,
@@ -504,15 +521,21 @@ export const gcSupervisorDecoders = {
   },
 
   getAgent(value: RawSupervisorSchema['AgentResponse']): GcAgent {
-    return decodeSupervisorPayload(AgentSchema, value, 'getAgent');
+    return decodeSupervisorPayload(null, AgentSchema, value, 'getAgent');
   },
 
   getBead(value: RawSupervisorSchema['Bead']): GcBead {
-    return decodeSupervisorPayload(BeadSchema, value, 'getBead');
+    return decodeSupervisorPayload('Bead', BeadSchema, value, 'getBead');
   },
 
   listBeads(value: RawSupervisorSchema['ListBodyBead']): GcBeadList {
     return decodeSupervisorPayload(
+      // izgc/6bv7 F16: Zod-only (no OpenAPI component gate). The supervisor
+      // may still emit legacy bead fields (owner/updated_at/closed_at/…)
+      // that the typed interior no longer declares; passthrough() must
+      // tolerate them rather than reject the whole list. The OpenAPI gate
+      // (additionalProperties:false on Bead) would reject those fields.
+      null,
       z.object({
         items: listItemsField(BeadSchema),
         // 6bv7 F14: OpenAPI ListBodyBead declares total required.
@@ -527,6 +550,7 @@ export const gcSupervisorDecoders = {
 
   listMail(value: RawSupervisorSchema['MailListBody']): GcMailList {
     return decodeSupervisorPayload(
+      'MailListBody',
       z.object({
         items: listItemsField(MailItemSchema),
         // 6bv7 F14: OpenAPI MailListBody declares total required.
@@ -541,6 +565,11 @@ export const gcSupervisorDecoders = {
 
   listEvents(value: RawSupervisorSchema['ListBodyWireEvent']): GcEventList {
     return decodeSupervisorPayload(
+      // izgc F13/F14: Zod-only (no OpenAPI component gate). passthrough()
+      // must tolerate the supervisor's phantom `next` key without rejecting
+      // the payload — the OpenAPI gate would reject any field not in the
+      // generated component, defeating the forward-compat passthrough.
+      null,
       z.object({
         items: listItemsField(EventSchema),
         // 6bv7 F13/F14: OpenAPI ListBodyWireEvent declares total required and
@@ -556,8 +585,31 @@ export const gcSupervisorDecoders = {
     );
   },
 
+  getRun(value: RawSupervisorSchema['WorkflowSnapshotResponse']): GcRunSnapshot {
+    const wire = decodeSupervisorPayload<GcWorkflowSnapshot>(
+      'WorkflowSnapshotResponse',
+      WorkflowSnapshotSchema,
+      value,
+      'getRun',
+    );
+    const {
+      workflow_id: workflowId,
+      snapshot_event_seq: snapshotEventSeq,
+      ...rest
+    } = wire;
+    const snapshot: GcRunSnapshot = {
+      ...rest,
+      run_id: workflowId,
+    };
+    if (snapshotEventSeq !== undefined) {
+      snapshot.snapshot_event_seq = snapshotEventSeq;
+    }
+    return snapshot;
+  },
+
   listFormulaRuns(value: RawSupervisorSchema['FormulaFeedBody']): GcFormulaRunList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: listItemsField(FormulaRunSchema),
         // mfb9: FormulaFeedBody.partial is required (`boolean`) per OpenAPI —
@@ -579,6 +631,7 @@ export const gcSupervisorDecoders = {
   // required; `recent_runs` is `T[] | null` (the listItemsField pattern).
   listFormulaRunsByName(value: RawSupervisorSchema['FormulaRunsResponse']): GcFormulaRunsResponse {
     return decodeSupervisorPayload(
+      null,
       z.object({
         formula: z.string(),
         run_count: z.number().finite(),
@@ -596,6 +649,7 @@ export const gcSupervisorDecoders = {
   // OrdersFeedBody.partial is required (mirrors FormulaFeedBody).
   listOrdersFeed(value: RawSupervisorSchema['OrdersFeedBody']): GcOrdersFeedResponse {
     return decodeSupervisorPayload(
+      null,
       z.object({
         items: listItemsField(FormulaRunSchema),
         partial: RequiredPartialField,
@@ -612,6 +666,7 @@ export const gcSupervisorDecoders = {
   // listItemsField pattern.
   listOrderHistory(value: RawSupervisorSchema['OrderHistoryListBody']): GcOrderHistoryList {
     return decodeSupervisorPayload(
+      null,
       z.object({
         entries: listItemsField(OrderHistoryEntrySchema),
       }).passthrough(),
@@ -632,6 +687,7 @@ export const gcSupervisorDecoders = {
   // on the cleanup wave.
   getOrderHistoryDetail(value: RawSupervisorSchema['OrderHistoryDetailResponse']): GcOrderHistoryDetail {
     return decodeSupervisorPayload(
+      null,
       z.object({
         bead_id: z.string(),
         store_ref: z.string(),
@@ -644,26 +700,69 @@ export const gcSupervisorDecoders = {
     );
   },
 
-  getWorkflow(value: RawSupervisorSchema['WorkflowSnapshotResponse']): GcWorkflowSnapshot {
-    return decodeSupervisorPayload(WorkflowSnapshotSchema, value, 'getWorkflow');
-  },
-
   getFormulaDetail(value: RawSupervisorSchema['FormulaDetailResponse']): GcFormulaDetail {
-    return decodeSupervisorPayload(FormulaDetailSchema, value, 'getFormulaDetail');
+    // izgc F5/F6: validate with the Zod schema only (no OpenAPI component
+    // gate). The generated OpenAPI marks `description` required, but the
+    // dashboard reads only name/preview/steps/deps — gating on description
+    // would reject otherwise-usable formula details that omit it, and would
+    // also reject the steps/deps=null degraded shape the schema tolerates.
+    return decodeSupervisorPayload(null, FormulaDetailSchema, value, 'getFormulaDetail');
   },
 
   fetchTranscript(value: RawSupervisorSchema['SessionTranscriptGetResponse']): GcTranscriptResponse {
-    return decodeSupervisorPayload(TranscriptResponseSchema, value, 'fetchTranscript');
+    return decodeSupervisorPayload(
+      'SessionTranscriptGetResponse',
+      TranscriptResponseSchema,
+      value,
+      'fetchTranscript',
+    );
   },
 
   health(value: RawSupervisorSchema['HealthOutputBody']): SupervisorHealth {
-    return decodeSupervisorPayload(HealthSchema, value, 'health');
+    return decodeSupervisorPayload(
+      'HealthOutputBody',
+      HealthSchema,
+      value,
+      'health',
+    );
   },
 
   getStatus(value: RawSupervisorSchema['StatusBody']): GcStatus {
-    return decodeSupervisorPayload(StatusSchema, value, 'getStatus');
+    return decodeSupervisorPayload(null, StatusSchema, value, 'getStatus');
+  },
+
+  // gascity-dashboard sling wire-field mapping. #61 renamed
+  // `SlingResponse.workflow_id` → `run_id`, but the gc supervisor still
+  // emits the JSON field `workflow_id` on the /sling wire. Read the wire
+  // field explicitly and map it onto the renamed property so the routed
+  // run id is NOT silently dropped on the cast at the write edge.
+  decodeSling(value: unknown): SlingResponse {
+    const wire = decodeSupervisorPayload<SlingWire>(
+      null,
+      SlingResponseSchema,
+      value,
+      'sling',
+    );
+    const { workflow_id: workflowId, ...rest } = wire;
+    return workflowId !== undefined ? { ...rest, run_id: workflowId } : rest;
   },
 } as const;
+
+interface SlingWire {
+  root_bead_id?: string;
+  bead?: string;
+  workflow_id?: string;
+  target?: string;
+  status?: string;
+}
+
+const SlingResponseSchema = z.object({
+  root_bead_id: z.string().optional(),
+  bead: z.string().optional(),
+  workflow_id: z.string().optional(),
+  target: z.string().optional(),
+  status: z.string().optional(),
+}).passthrough();
 
 // gascity-dashboard-t5l6: `z.ZodType<SchemaOutputFor<NoInfer<Decoded>>>`
 // (not the bare `z.ZodType`) is load-bearing. It ties the Zod schema's
@@ -674,10 +773,17 @@ export const gcSupervisorDecoders = {
 // wire-shape contract. Verified by
 // backend/test/gc-supervisor-decoders-types.test.ts.
 function decodeSupervisorPayload<Decoded>(
+  componentName: string | null,
   schema: z.ZodType<SchemaOutputFor<NoInfer<Decoded>>>,
   value: unknown,
   payload: string,
 ): Decoded {
+  if (componentName !== null) {
+    const openApiIssue = validateGcSupervisorComponent(componentName, value);
+    if (openApiIssue !== undefined) {
+      throw invalidOpenApi(payload, openApiIssue);
+    }
+  }
   const parsed = schema.safeParse(value);
   if (!parsed.success) {
     throw invalid(payload, parsed.error);
@@ -687,6 +793,15 @@ function decodeSupervisorPayload<Decoded>(
   // SchemaOutputFor comment). Narrow, documented cast — not the
   // unconstrained `as Decoded` laundering removed by t5l6.
   return parsed.data as Decoded;
+}
+
+function invalidOpenApi(
+  payload: string,
+  issue: { readonly path: readonly (string | number)[]; readonly expected: string },
+): Error {
+  return new Error(
+    `invalid gc supervisor ${payload} payload: ${openApiIssuePath(issue.path)} must be ${issue.expected}`,
+  );
 }
 
 // Maps a shared SSOT type into the structural shape a Zod schema is

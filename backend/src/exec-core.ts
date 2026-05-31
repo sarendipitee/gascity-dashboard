@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 
 export const MAX_BYTES = 100 * 1024;
 export const MAX_BYTES_LARGE = 2 * 1024 * 1024;
-export const MAX_WORKFLOW_DIFF_BYTES = 512 * 1024;
+export const MAX_RUN_DIFF_BYTES = 512 * 1024;
 const MAX_CONCURRENT = 4;
 
 // Agent alias / `gc sling` target validator.
@@ -42,6 +42,27 @@ export interface ExecResult {
   durationMs: number;
 }
 
+export type ExecSpawn = (
+  cmd: string,
+  args: string[],
+  timeoutMs: number,
+  maxBytes: number,
+) => Promise<ExecResult>;
+
+export interface ExecRunner {
+  runExec(
+    cmd: string,
+    args: string[],
+    timeoutMs: number,
+    maxBytes?: number,
+  ): Promise<ExecResult>;
+}
+
+export interface ExecRunnerOptions {
+  maxConcurrent?: number;
+  spawnExec?: ExecSpawn;
+}
+
 export class ExecError extends Error {
   constructor(message: string, public readonly kind: 'validation' | 'timeout' | 'spawn') {
     super(message);
@@ -65,28 +86,51 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-let runningCount = 0;
-const waiting: Array<() => void> = [];
+export function createExecRunner({
+  maxConcurrent = MAX_CONCURRENT,
+  spawnExec = spawnExecProcess,
+}: ExecRunnerOptions = {}): ExecRunner {
+  let runningCount = 0;
+  const waiting: Array<() => void> = [];
 
-function acquireSlot(): Promise<void> {
-  return new Promise((resolve) => {
-    const tryAcquire = () => {
-      if (runningCount < MAX_CONCURRENT) {
-        runningCount += 1;
-        resolve();
-      } else {
-        waiting.push(tryAcquire);
+  function acquireSlot(): Promise<void> {
+    return new Promise((resolve) => {
+      const tryAcquire = () => {
+        if (runningCount < maxConcurrent) {
+          runningCount += 1;
+          resolve();
+        } else {
+          waiting.push(tryAcquire);
+        }
+      };
+      tryAcquire();
+    });
+  }
+
+  function releaseSlot(): void {
+    runningCount -= 1;
+    const next = waiting.shift();
+    if (next) next();
+  }
+
+  return {
+    async runExec(
+      cmd: string,
+      args: string[],
+      timeoutMs: number,
+      maxBytes: number = MAX_BYTES,
+    ): Promise<ExecResult> {
+      await acquireSlot();
+      try {
+        return await spawnExec(cmd, args, timeoutMs, maxBytes);
+      } finally {
+        releaseSlot();
       }
-    };
-    tryAcquire();
-  });
+    },
+  };
 }
 
-function releaseSlot(): void {
-  runningCount -= 1;
-  const next = waiting.shift();
-  if (next) next();
-}
+const defaultExecRunner = createExecRunner();
 
 export async function runExec(
   cmd: string,
@@ -94,15 +138,10 @@ export async function runExec(
   timeoutMs: number,
   maxBytes: number = MAX_BYTES,
 ): Promise<ExecResult> {
-  await acquireSlot();
-  try {
-    return await spawnExec(cmd, args, timeoutMs, maxBytes);
-  } finally {
-    releaseSlot();
-  }
+  return defaultExecRunner.runExec(cmd, args, timeoutMs, maxBytes);
 }
 
-function spawnExec(
+function spawnExecProcess(
   cmd: string,
   args: string[],
   timeoutMs: number,

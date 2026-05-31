@@ -53,4 +53,19 @@ describe('useVisibleInterval', () => {
     vi.advanceTimersByTime(1_000);
     expect(callback).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps interval callbacks simple and does not apply async-refresh backoff', () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    const callback = vi.fn();
+
+    renderHook(() => useVisibleInterval(callback, 1_000));
+
+    vi.advanceTimersByTime(1_000);
+    expect(callback).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1_000);
+    expect(callback).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(1_000);
+    expect(callback).toHaveBeenCalledTimes(3);
+  });
 });

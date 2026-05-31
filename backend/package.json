@@ -13,6 +13,7 @@
     "test": "bash -c 'shopt -s globstar nullglob && node --import tsx --test test/*.test.ts src/**/*.test.ts'"
   },
   "dependencies": {
+    "ajv": "^6.15.0",
     "express": "^4.21.2",
     "gas-city-dashboard-shared": "*",
     "openapi-fetch": "^0.17.0",

@@ -197,12 +197,12 @@ describe('MaintainerPage — needs-you mode (dw8)', () => {
     expect(link.getAttribute('href')).toBe('/maintainer');
   });
 
-  it('renders the workflow cross-link in needs-you mode', async () => {
+  it('renders the runs cross-link in needs-you mode', async () => {
     mockTriage.mockResolvedValue(
       envelope([mkItem({ kind: 'pr', number: 1, status: 'changes_requested' })]),
     );
     mount(['/maintainer?view=needs-you']);
-    const link = await screen.findByRole('link', { name: /workflows/i });
-    expect(link.getAttribute('href')).toBe('/workflows');
+    const link = await screen.findByRole('link', { name: /runs/i });
+    expect(link.getAttribute('href')).toBe('/runs');
   });
 });
