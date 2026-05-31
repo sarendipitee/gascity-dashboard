@@ -98,6 +98,9 @@ export function LaneCard({ lane, now }: LaneCardProps) {
       <StageLadder stages={lane.stages} label={lane.title} />
 
       <div className="mt-2 flex items-baseline gap-x-4 gap-y-1 flex-wrap text-label">
+        <span className="text-fg-faint tnum" title="run root bead">
+          {lane.id}
+        </span>
         {lane.activeAssignees.length > 0 && (
           <span className="text-fg-muted lowercase tracking-normal">
             <span className="uppercase tracking-wider text-fg-faint">on </span>
