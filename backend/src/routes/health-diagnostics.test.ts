@@ -100,6 +100,34 @@ describe('buildDiagnostics', () => {
     }
   });
 
+  test('carries last_gc_at and strips unknown passthrough wire keys from dolt usage', async () => {
+    // store_health is Zod-decoded with passthrough(), so unknown keys ride
+    // along on the wire object at runtime. The edge mapping must surface the
+    // known last_gc_at field and drop unknown keys rather than forwarding them
+    // into the client DTO (serialization-at-the-edges invariant).
+    const status = {
+      ...fullStatus,
+      store_health: {
+        ...fullStatus.store_health,
+        last_gc_at: '2026-05-30T08:00:00Z',
+        unexpected_wire_key: 'leak',
+      },
+    } as unknown as GcStatus;
+    const d = await buildDiagnostics({
+      status,
+      doltProbe: okProbe('2.0.7'),
+      beadsProbe: okProbe('1.0.4'),
+    });
+    assert.equal(d.doltUsage.status, 'available');
+    if (d.doltUsage.status === 'available') {
+      assert.equal(d.doltUsage.value.last_gc_at, '2026-05-30T08:00:00Z');
+      assert.ok(
+        !Object.prototype.hasOwnProperty.call(d.doltUsage.value, 'unexpected_wire_key'),
+        'unknown passthrough key must not leak into the DTO',
+      );
+    }
+  });
+
   test('translates work counts into beads usage', async () => {
     const d = await buildDiagnostics({
       status: fullStatus,

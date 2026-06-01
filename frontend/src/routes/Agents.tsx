@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   GC_EVENT_PREFIX,
@@ -120,6 +120,16 @@ export function AgentsPage() {
       a.label.localeCompare(b.label),
     );
   }, [rows]);
+
+  // If the selected rig leaves the roster (its agents all stopped and were
+  // pruned on an SSE/manual refresh), the controlled <select> would keep
+  // filtering against a rig with no rows and strand the table empty with no
+  // visible cause. Reset to "all rigs" when the selection is no longer present.
+  useEffect(() => {
+    if (rigFilter !== RIG_FILTER_ALL && !rigOptions.some((o) => o.key === rigFilter)) {
+      setRigFilter(RIG_FILTER_ALL);
+    }
+  }, [rigOptions, rigFilter]);
 
   const visibleRows = useMemo(() => {
     const needle = search.trim().toLowerCase();

@@ -13,6 +13,7 @@ import { StatusBadge, type StatusTone } from '../components/StatusBadge';
 import { useCachedData } from '../hooks/useCachedData';
 import { useVisibleRefresh } from '../hooks/useVisibleRefresh';
 import { formatHumanSize } from '../lib/format';
+import { formatShortDate } from '../hooks/time';
 
 // Health page fetches the two slow paths in parallel through the
 // stale-while-revalidate cache so re-entering this view (or polling
@@ -264,6 +265,9 @@ function DoltUsageBlock({
             value={u.last_gc_status}
             {...(u.last_gc_status !== 'success' ? { tone: 'warn' as const } : {})}
           />
+        )}
+        {u.last_gc_at !== undefined && (
+          <Kv label="Last maintenance at" value={formatShortDate(u.last_gc_at)} />
         )}
         {u.path !== undefined && <Kv label="Store path" value={u.path} />}
       </KvList>

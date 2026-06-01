@@ -74,13 +74,21 @@ export function healthRouter(gc: GcClient, opts: HealthRouterOptions = {}): Rout
   router.get('/system', async (_req, res) => {
     const mem = process.memoryUsage();
     const load = os.loadavg();
+    // The health probe and the status fetch are independent supervisor calls —
+    // neither result feeds the other — so they ride one parallel wave bounded
+    // to the same timeout window instead of stacking serially (gascity-dashboard-1cob
+    // review). getStatus takes an AbortSignal rather than a timeoutMs option, so
+    // it is bounded with AbortSignal.timeout to match supervisorTimeoutMs.
+    const [healthSettled, statusSettled] = await Promise.allSettled([
+      gc.health({ timeoutMs: supervisorTimeoutMs }),
+      gc.getStatus(AbortSignal.timeout(supervisorTimeoutMs)),
+    ]);
+
     let supervisor: SupervisorHealthState;
-    try {
-      supervisor = {
-        status: 'available',
-        data: await gc.health({ timeoutMs: supervisorTimeoutMs }),
-      };
-    } catch (err) {
+    if (healthSettled.status === 'fulfilled') {
+      supervisor = { status: 'available', data: healthSettled.value };
+    } else {
+      const err = healthSettled.reason;
       // gascity-dashboard-mek: distinguish hung supervisor (504) from
       // broken supervisor (200 + explicit unavailable state). Generic fetch
       // failures (connection refused, 5xx, JSON parse error) still keep the
@@ -99,16 +107,20 @@ export function healthRouter(gc: GcClient, opts: HealthRouterOptions = {}): Rout
         error: 'supervisor health unavailable',
       };
     }
+
     // Diagnostics (gascity-dashboard-1cob): supervisor status carries Dolt +
     // Beads usage and the recommended-vs-actual threshold; the binary versions
     // are probed locally. A status fetch failure does NOT 504 the route — the
     // local version probes are still useful — so it degrades to null status and
     // the builder surfaces the supervisor-sourced fields as unavailable.
     let status: GcStatus | null;
-    try {
-      status = await gc.getStatus();
-    } catch (err) {
-      logWarn(LOG_COMPONENT.health, `supervisor status fetch failed: ${errorMessage(err)}`);
+    if (statusSettled.status === 'fulfilled') {
+      status = statusSettled.value;
+    } else {
+      logWarn(
+        LOG_COMPONENT.health,
+        `supervisor status fetch failed: ${errorMessage(statusSettled.reason)}`,
+      );
       status = null;
     }
     const diagnostics = await buildDiagnostics({ status, doltProbe, beadsProbe });

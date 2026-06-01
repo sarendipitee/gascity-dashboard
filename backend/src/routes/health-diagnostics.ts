@@ -65,7 +65,24 @@ function doltUsageOf(status: GcStatus | null): DiagnosticValue<DoltUsage> {
   if (sh === undefined) {
     return { status: 'unavailable', reason: STATUS_UNAVAILABLE_REASON };
   }
-  return { status: 'available', value: { ...sh }, source: STATUS_SOURCE };
+  // Map known fields explicitly rather than spreading `sh` directly: store_health
+  // is decoded with a passthrough() schema, so `{ ...sh }` would leak unknown wire
+  // keys into the client DTO and violate the serialization-at-the-edges invariant
+  // (review). Optional keys are spread conditionally so absent fields stay absent
+  // under exactOptionalPropertyTypes rather than becoming present-with-undefined.
+  const value: DoltUsage = {
+    size_bytes: sh.size_bytes,
+    ...(sh.live_rows !== undefined && { live_rows: sh.live_rows }),
+    ...(sh.ratio_mb_per_row !== undefined && { ratio_mb_per_row: sh.ratio_mb_per_row }),
+    ...(sh.threshold_mb_per_row !== undefined && {
+      threshold_mb_per_row: sh.threshold_mb_per_row,
+    }),
+    ...(sh.warning !== undefined && { warning: sh.warning }),
+    ...(sh.last_gc_at !== undefined && { last_gc_at: sh.last_gc_at }),
+    ...(sh.last_gc_status !== undefined && { last_gc_status: sh.last_gc_status }),
+    ...(sh.path !== undefined && { path: sh.path }),
+  };
+  return { status: 'available', value, source: STATUS_SOURCE };
 }
 
 function beadsUsageOf(status: GcStatus | null): DiagnosticValue<BeadsUsage> {
