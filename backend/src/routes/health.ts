@@ -1,10 +1,16 @@
 import { Router } from 'express';
 import os from 'node:os';
-import type { SupervisorHealthState, SystemHealth } from 'gas-city-dashboard-shared';
+import type {
+  GcStatus,
+  SupervisorHealthState,
+  SystemHealth,
+} from 'gas-city-dashboard-shared';
 import { GcClient } from '../gc-client.js';
 import { recordAudit } from '../audit.js';
 import { HTTP_STATUS } from '../lib/http-status.js';
 import { LOG_COMPONENT, errorMessage, logWarn } from '../logging.js';
+import { buildDiagnostics, type VersionProbe } from './health-diagnostics.js';
+import { probeBeadsVersion, probeDoltVersion } from './version-probe.js';
 
 // Health uses a tighter window than the global GcClient timeout (5s default)
 // because /v0/city/{name}/health is a cheap localhost ping. 2.5s is plenty
@@ -44,6 +50,12 @@ export interface HealthRouterOptions {
    * time, not re-read per request.
    */
   supervisorTimeoutMs?: number;
+  /**
+   * Local CLI version probes. Defaults to the real `dolt version` / `bd
+   * version` exec probes; tests inject deterministic stand-ins.
+   */
+  doltProbe?: VersionProbe;
+  beadsProbe?: VersionProbe;
 }
 
 /**
@@ -56,17 +68,27 @@ export interface HealthRouterOptions {
 export function healthRouter(gc: GcClient, opts: HealthRouterOptions = {}): Router {
   const router = Router();
   const supervisorTimeoutMs = opts.supervisorTimeoutMs ?? resolveHealthTimeoutMs();
+  const doltProbe = opts.doltProbe ?? probeDoltVersion;
+  const beadsProbe = opts.beadsProbe ?? probeBeadsVersion;
 
   router.get('/system', async (_req, res) => {
     const mem = process.memoryUsage();
     const load = os.loadavg();
+    // The health probe and the status fetch are independent supervisor calls —
+    // neither result feeds the other — so they ride one parallel wave bounded
+    // to the same timeout window instead of stacking serially (gascity-dashboard-1cob
+    // review). getStatus takes an AbortSignal rather than a timeoutMs option, so
+    // it is bounded with AbortSignal.timeout to match supervisorTimeoutMs.
+    const [healthSettled, statusSettled] = await Promise.allSettled([
+      gc.health({ timeoutMs: supervisorTimeoutMs }),
+      gc.getStatus(AbortSignal.timeout(supervisorTimeoutMs)),
+    ]);
+
     let supervisor: SupervisorHealthState;
-    try {
-      supervisor = {
-        status: 'available',
-        data: await gc.health({ timeoutMs: supervisorTimeoutMs }),
-      };
-    } catch (err) {
+    if (healthSettled.status === 'fulfilled') {
+      supervisor = { status: 'available', data: healthSettled.value };
+    } else {
+      const err = healthSettled.reason;
       // gascity-dashboard-mek: distinguish hung supervisor (504) from
       // broken supervisor (200 + explicit unavailable state). Generic fetch
       // failures (connection refused, 5xx, JSON parse error) still keep the
@@ -85,6 +107,23 @@ export function healthRouter(gc: GcClient, opts: HealthRouterOptions = {}): Rout
         error: 'supervisor health unavailable',
       };
     }
+
+    // Diagnostics (gascity-dashboard-1cob): supervisor status carries Dolt +
+    // Beads usage and the recommended-vs-actual threshold; the binary versions
+    // are probed locally. A status fetch failure does NOT 504 the route — the
+    // local version probes are still useful — so it degrades to null status and
+    // the builder surfaces the supervisor-sourced fields as unavailable.
+    let status: GcStatus | null;
+    if (statusSettled.status === 'fulfilled') {
+      status = statusSettled.value;
+    } else {
+      logWarn(
+        LOG_COMPONENT.health,
+        `supervisor status fetch failed: ${errorMessage(statusSettled.reason)}`,
+      );
+      status = null;
+    }
+    const diagnostics = await buildDiagnostics({ status, doltProbe, beadsProbe });
     const payload: SystemHealth = {
       admin: {
         pid: process.pid,
@@ -103,6 +142,7 @@ export function healthRouter(gc: GcClient, opts: HealthRouterOptions = {}): Rout
         uptime_sec: Math.round(os.uptime()),
       },
       supervisor,
+      diagnostics,
     };
     await recordAudit({
       type: 'dashboard.fetch',
