@@ -39,6 +39,7 @@ export * from './links/node-ref.js';
 export * from './links/relation-index.js';
 export * from './city.js';
 export * from './operator.js';
+export * from './operator-mail.js';
 export * from './alert.js';
 export * from './pending.js';
 export * from './context-window.js';

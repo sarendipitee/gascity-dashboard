@@ -221,17 +221,26 @@ test('GcClient uses the generated hey-api SDK instead of the legacy openapi-fetc
   assert.doesNotMatch(source, /\.GET\(/);
 });
 
-test('GcClient does not mirror supervisor mail or event history for dashboard clients', async () => {
+test('GcClient does not mirror supervisor EVENT history, and uses no deleted mail/event DTOs', async () => {
   const source = await readFile(gcClientUrl, 'utf8');
 
+  // The deleted shared mail/event DTOs must never reappear in the backend
+  // client — supervisor wire shapes are the generated types now.
   assert.doesNotMatch(source, /\bGcMailList\b/);
   assert.doesNotMatch(source, /\bGcEventList\b/);
-  assert.doesNotMatch(source, /\bgetV0CityByCityNameMail\b/);
+
+  // Event history stays browser-direct: clients read the supervisor event
+  // stream through the transport proxy, so the backend must NOT re-mirror it.
   assert.doesNotMatch(source, /\bgetV0CityByCityNameEvents\b/);
-  assert.doesNotMatch(source, /\blistMail\s*\(/);
   assert.doesNotMatch(source, /\blistEvents\s*\(/);
-  assert.doesNotMatch(source, /gcSupervisorDecoders\.listMail/);
   assert.doesNotMatch(source, /gcSupervisorDecoders\.listEvents/);
+
+  // NOTE: mail is the deliberate exception (gascity-dashboard-mpfx, R4). The
+  // snapshot derives operator-mail alerts SERVER-SIDE (the sender-role filter
+  // can't run in the browser before the digest reaches Home), so gc.listMail +
+  // the listMail decoder exist for that internal read. This is NOT a
+  // browser-facing mail mirror — there is no /api mail route; the browser still
+  // reads mail directly through the supervisor transport proxy.
 });
 
 test('GcClient does not mirror the supervisor agent roster through shared DTOs', async () => {

@@ -24,6 +24,7 @@ import type {
   FormulaFeedBody,
   ListBodyAgentResponse,
   ListBodyRigResponse,
+  MailListBody,
   StatusBody,
 } from './generated/gc-supervisor-client/types.gen.js';
 import {
@@ -34,6 +35,7 @@ import {
   getV0CityByCityNameBeads,
   getV0CityByCityNameFormulasByName,
   getV0CityByCityNameFormulasFeed,
+  getV0CityByCityNameMail,
   getV0CityByCityNameRigs,
   getV0CityByCityNameSessionByIdTranscript,
   getV0CityByCityNameSessions,
@@ -296,6 +298,34 @@ export class GcClient {
       (upstreamSignal) => getV0CityByCityNameSessions({
         client: this.supervisor,
         path: this.cityPathParams(),
+        signal: upstreamSignal,
+      }),
+      signal,
+    );
+  }
+
+  /**
+   * `GET /v0/city/{name}/mail` — the city mailbox. The snapshot service reads
+   * this to derive operator-mail alerts (mpfx, R4); the sender-role filter that
+   * decides what needs the human lives in shared/operator-mail.ts. `box`/`alias`
+   * are accepted and keyed into the coalescing slot for forward-compat, but the
+   * supervisor ignores them today — the actual filter is sender-role, applied
+   * downstream. `limit` IS honoured (supervisor default 50, caps at 1000), so an
+   * unparametrized fetch would silently truncate the feed.
+   */
+  async listMail(
+    signal?: AbortSignal,
+    params?: { box?: 'inbox' | 'sent'; alias?: string; limit?: number },
+  ): Promise<MailListBody> {
+    const query: { limit?: number } = {};
+    if (params?.limit !== undefined) query.limit = params.limit;
+    return this.getOperation(
+      this.operationKey('getV0CityByCityNameMail', [params?.box, params?.alias, params?.limit]),
+      gcSupervisorDecoders.listMail,
+      (upstreamSignal) => getV0CityByCityNameMail({
+        client: this.supervisor,
+        path: this.cityPathParams(),
+        query,
         signal: upstreamSignal,
       }),
       signal,

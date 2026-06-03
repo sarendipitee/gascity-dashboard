@@ -17,6 +17,7 @@ import type {
   ListBodyBead,
   ListBodyRigResponse,
   ListBodySessionResponse,
+  MailListBody,
   SessionTranscriptGetResponse,
   StatusBody,
   SupervisorCitiesOutputBody,
@@ -32,6 +33,7 @@ type RawSupervisorSchema = {
   ListBodyBead: ListBodyBead;
   ListBodyRigResponse: ListBodyRigResponse;
   ListBodySessionResponse: ListBodySessionResponse;
+  MailListBody: MailListBody;
   SessionTranscriptGetResponse: SessionTranscriptGetResponse;
   StatusBody: StatusBody;
   SupervisorCitiesOutputBody: SupervisorCitiesOutputBody;
@@ -137,6 +139,21 @@ const RigSchema = z.object({
   path: z.string(),
   running_count: z.number().finite(),
   suspended: z.boolean(),
+}).passthrough();
+
+// One mail message. Only the fields the snapshot's operator-mail alert
+// derivation reads (sender, read state, timestamp, identity) are validated;
+// the rest (cc/priority/rig/thread_id/…) pass through. Mirrors the generated
+// `Message` shape — the dashboard re-validates at the trust boundary rather
+// than relying solely on the generated client's own validation.
+const MailMessageSchema = z.object({
+  id: z.string(),
+  from: z.string(),
+  to: z.string(),
+  subject: z.string(),
+  body: z.string(),
+  created_at: z.string(),
+  read: z.boolean(),
 }).passthrough();
 
 // Host-side city descriptor. Retains the untrusted host `path` because the
@@ -330,6 +347,19 @@ export const gcSupervisorDecoders = {
       }).passthrough(),
       value,
       'listRigs',
+    );
+  },
+
+  listMail(value: RawSupervisorSchema['MailListBody']): MailListBody {
+    return decodeSupervisorPayload(
+      z.object({
+        items: listItemsField(MailMessageSchema),
+        total: z.number().finite(),
+        partial: PartialField,
+        partial_errors: PartialErrorsField,
+      }).passthrough(),
+      value,
+      'listMail',
     );
   },
 
