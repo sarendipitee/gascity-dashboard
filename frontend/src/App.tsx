@@ -5,6 +5,7 @@ import { AttentionProvider } from './attention/context';
 import { useLiveAttentionContributors } from './attention/liveContributors';
 import { Layout } from './components/Layout';
 import { NowProvider } from './contexts/NowContext';
+import { ReadOnlyProvider, resolveReadOnly } from './contexts/ReadOnlyContext';
 import { ViewingAsProvider } from './contexts/ViewingAsContext';
 import { useCachedData } from './hooks/useCachedData';
 import { ALL_VIEWS } from './views/registry';
@@ -35,9 +36,13 @@ export function App() {
   // flight `data` is undefined; we treat that as core-only, matching the
   // steady-state default install and preventing disabled first-party modules
   // from flashing or fetching before config lands.
-  const { data: config } = useCachedData('config', () => api.config());
+  const { data: config, error: configError } = useCachedData('config', () => api.config());
   const enabledModules = config?.enabledModules ?? null;
   const defaultViewEnv = config?.defaultView ?? null;
+  // Read-only posture is fail-closed on a config-fetch error and writable only
+  // while the first fetch is in flight — see resolveReadOnly. The server proxy
+  // gate stays the real enforcement throughout.
+  const readOnly = resolveReadOnly(config, configError);
   const attentionContributors = useLiveAttentionContributors(enabledModules);
 
   const enabledViews = useMemo(
@@ -60,46 +65,48 @@ export function App() {
   return (
     <ViewingAsProvider>
       <NowProvider>
-        <AttentionProvider contributors={attentionContributors}>
-          <Layout>
-            <Suspense fallback={null}>
-              <Routes>
-                {/* `/` resolution (PRD §6 / bead 9yj.5):
+        <ReadOnlyProvider readOnly={readOnly}>
+          <AttentionProvider contributors={attentionContributors}>
+            <Layout>
+              <Suspense fallback={null}>
+                <Routes>
+                  {/* `/` resolution (PRD §6 / bead 9yj.5):
                   DEFAULT_VIEW env → descriptor `defaultRoute: true` →
                   kb3 ambient home fallback. The resolver runs once per
                   enabled-set / env change; warnings surface in the
                   browser console for premortem #5 visibility. */}
-                <Route
-                  path="/"
-                  element={
-                    defaultRedirectTo !== null ? (
-                      <Navigate to={defaultRedirectTo} replace />
-                    ) : DefaultViewElement !== null ? (
-                      <DefaultViewElement />
-                    ) : (
-                      <AmbientHomePage />
-                    )
-                  }
-                />
-                <Route path="/agents" element={<AgentsPage />} />
-                <Route path="/agents/:slug" element={<AgentDetailPage />} />
-                <Route path="/beads" element={<BeadsPage />} />
-                <Route path="/runs" element={<RunsPage />} />
-                <Route path="/runs/:runId" element={<FormulaRunDetailPage />} />
-                <Route path="/mail" element={<MailPage />} />
-                {/* Modular-dashboard registry routes, filtered by the
+                  <Route
+                    path="/"
+                    element={
+                      defaultRedirectTo !== null ? (
+                        <Navigate to={defaultRedirectTo} replace />
+                      ) : DefaultViewElement !== null ? (
+                        <DefaultViewElement />
+                      ) : (
+                        <AmbientHomePage />
+                      )
+                    }
+                  />
+                  <Route path="/agents" element={<AgentsPage />} />
+                  <Route path="/agents/:slug" element={<AgentDetailPage />} />
+                  <Route path="/beads" element={<BeadsPage />} />
+                  <Route path="/runs" element={<RunsPage />} />
+                  <Route path="/runs/:runId" element={<FormulaRunDetailPage />} />
+                  <Route path="/mail" element={<MailPage />} />
+                  {/* Modular-dashboard registry routes, filtered by the
                   backend's enabledModules set. A disabled module's path
                   is absent so deep-link bookmarks surface the operator's
                   MODULES_ENABLED change as the explicit catch-all route. */}
-                {enabledViews.map((v) => {
-                  const Element = v.element;
-                  return <Route key={v.id} path={v.path} element={<Element />} />;
-                })}
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
-            </Suspense>
-          </Layout>
-        </AttentionProvider>
+                  {enabledViews.map((v) => {
+                    const Element = v.element;
+                    return <Route key={v.id} path={v.path} element={<Element />} />;
+                  })}
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              </Suspense>
+            </Layout>
+          </AttentionProvider>
+        </ReadOnlyProvider>
       </NowProvider>
     </ViewingAsProvider>
   );

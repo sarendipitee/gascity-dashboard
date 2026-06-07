@@ -14,6 +14,7 @@ import {
   filterTierByNeedsPr,
 } from './triageFilters';
 import { useNow } from '../../../contexts/NowContext';
+import { ReadOnlyBadge, useReadOnly } from '../../../contexts/ReadOnlyContext';
 import { api } from '../../../api/client';
 import { cityPath, getActiveCity } from '../../../api/cityBase';
 import { setCached } from '../../../api/cache';
@@ -74,6 +75,7 @@ export function MaintainerPage() {
     api.maintainerTriage(),
   );
   const { viewingAs } = useViewingAs();
+  const readOnly = useReadOnly();
   // dw8 — `?view=needs-you` activates the Needs-You composite filter
   // mode. The query param is the activation surface (R13: no new
   // route); the mode itself short-circuits some chip rendering and
@@ -204,6 +206,9 @@ export function MaintainerPage() {
   // endpoint directly; the dashboard service records only local slung state.
   const handleSend = useCallback(
     async (intent: MaintainerSlingIntent) => {
+      // Defense-in-depth: the disabled sling buttons already block this, but a
+      // keyboard/programmatic path must never reach a write the server 405s.
+      if (readOnly) return;
       const successLabel = intent === 'triage' ? TRIAGE_TARGET_LABEL : DRAFT_TARGET_LABEL;
       setSlinging(intent);
       setSlingError(null);
@@ -254,7 +259,7 @@ export function MaintainerPage() {
         setSlinging(null);
       }
     },
-    [selection, allItems, setSlingSuccess, clearSlingSuccess],
+    [selection, allItems, readOnly, setSlingSuccess, clearSlingSuccess],
   );
 
   return (
@@ -269,6 +274,7 @@ export function MaintainerPage() {
                 {refreshError ?? error}
               </span>
             )}
+            {readOnly && <ReadOnlyBadge />}
             <Button size="sm" onClick={toggleFocus}>
               {focusBreaking ? 'Show all tiers' : 'Breaking only'}
             </Button>
@@ -385,6 +391,7 @@ export function MaintainerPage() {
                 sending={slinging}
                 error={slingError}
                 success={slingSuccess}
+                readOnly={readOnly}
               />
             )}
         </>

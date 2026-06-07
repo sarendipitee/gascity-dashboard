@@ -17,6 +17,7 @@ import { ComposeModal } from '../components/mail/ComposeModal';
 import { ThreadMessage } from '../components/mail/ThreadMessage';
 import { Field } from '../components/Field';
 import { useNow } from '../contexts/NowContext';
+import { READ_ONLY_CONTROL_TITLE, ReadOnlyBadge, useReadOnly } from '../contexts/ReadOnlyContext';
 import { useViewingAs, OPERATOR_ALIAS } from '../contexts/ViewingAsContext';
 import { displayLabel } from '../hooks/aliasPriority';
 import { useListFilters, type FilterChip } from '../hooks/useListFilters';
@@ -64,6 +65,7 @@ const DEEP_LINK_MAIL_HISTORY_LIMIT: MailHistoryLimit = 1000;
 
 export function MailPage() {
   const attention = useAttentionModel();
+  const readOnly = useReadOnly();
   const [searchParams] = useSearchParams();
   const selectedMessageParam = normalizeSelectedMessageParam(searchParams.get('message'));
   const {
@@ -152,6 +154,9 @@ export function MailPage() {
     async (action: MailAction) => {
       const message = threadFor;
       if (message === null) return;
+      // Defense-in-depth: the disabled buttons already block this, but a
+      // keyboard/programmatic path must never reach a write the server 405s.
+      if (readOnly) return;
       setActionInFlight(action);
       setError(null);
       try {
@@ -186,7 +191,7 @@ export function MailPage() {
         setActionInFlight(null);
       }
     },
-    [historyLimit, refresh, replyBody, threadFor, viewingAs.alias],
+    [historyLimit, readOnly, refresh, replyBody, threadFor, viewingAs.alias],
   );
 
   const columns = useMemo<ReadonlyArray<TableColumn<SupervisorMailItem>>>(
@@ -270,6 +275,7 @@ export function MailPage() {
   // Sent box has no unread concept; suppress those chips there.
   const visibleChips = box === 'sent' ? [] : MAIL_CHIPS;
   const replyDisabled =
+    readOnly ||
     threadFor === null ||
     replyBody.trim().length === 0 ||
     actionInFlight !== null ||
@@ -287,14 +293,17 @@ export function MailPage() {
                 {error}
               </span>
             )}
+            {readOnly && <ReadOnlyBadge />}
             <Button
               size="sm"
               onClick={() => setComposing(true)}
-              disabled={!viewingAs.isOperator}
+              disabled={readOnly || !viewingAs.isOperator}
               title={
-                viewingAs.isOperator
-                  ? 'Compose a new message (sends as the operator)'
-                  : 'Switch back to the operator to compose'
+                readOnly
+                  ? READ_ONLY_CONTROL_TITLE
+                  : viewingAs.isOperator
+                    ? 'Compose a new message (sends as the operator)'
+                    : 'Switch back to the operator to compose'
               }
             >
               Compose
@@ -391,7 +400,8 @@ export function MailPage() {
               <Button
                 tone="quiet"
                 size="sm"
-                disabled={actionInFlight !== null}
+                title={readOnly ? READ_ONLY_CONTROL_TITLE : undefined}
+                disabled={readOnly || actionInFlight !== null}
                 onClick={() => void runMailAction(threadFor.read ? 'unread' : 'read')}
               >
                 {threadFor.read ? 'Mark unread' : 'Mark read'}
@@ -399,7 +409,8 @@ export function MailPage() {
               <Button
                 tone="quiet"
                 size="sm"
-                disabled={actionInFlight !== null}
+                title={readOnly ? READ_ONLY_CONTROL_TITLE : undefined}
+                disabled={readOnly || actionInFlight !== null}
                 onClick={() => void runMailAction('archive')}
               >
                 {actionInFlight === 'archive' ? 'Archiving' : 'Archive'}
@@ -407,6 +418,7 @@ export function MailPage() {
               <Button
                 tone="accent"
                 size="sm"
+                title={readOnly ? READ_ONLY_CONTROL_TITLE : undefined}
                 disabled={replyDisabled}
                 onClick={() => void runMailAction('reply')}
               >
@@ -437,7 +449,8 @@ export function MailPage() {
                 onChange={(e) => setReplyBody(e.target.value)}
                 rows={5}
                 maxLength={16 * 1024}
-                disabled={!viewingAs.isOperator}
+                title={readOnly ? READ_ONLY_CONTROL_TITLE : undefined}
+                disabled={readOnly || !viewingAs.isOperator}
                 className="w-full bg-surface-tint border border-rule rounded-sm px-3 py-2 text-body text-fg focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/40 resize-y disabled:opacity-50"
               />
             </Field>
