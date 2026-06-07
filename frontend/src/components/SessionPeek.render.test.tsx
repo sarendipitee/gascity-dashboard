@@ -45,9 +45,7 @@ describe('SessionPeekContent — terminal control stripping', () => {
   });
 
   it('shows an expand button for a non-empty transcript', () => {
-    render(
-      <SessionPeekContent loading={false} error={null} result={viewWithTurn('hello')} />,
-    );
+    render(<SessionPeekContent loading={false} error={null} result={viewWithTurn('hello')} />);
     expect(screen.getByRole('button', { name: /expand/i })).toBeTruthy();
   });
 

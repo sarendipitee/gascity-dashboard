@@ -1,7 +1,26 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TranscriptBox } from './TranscriptBox';
 
+// jsdom has no matchMedia; the overlay's prefers-reduced-motion check needs it.
+// Mirrors the stub in Header.attention.test.tsx.
+function stubMatchMedia(matches: boolean): void {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+beforeEach(() => stubMatchMedia(false));
 afterEach(cleanup);
 
 describe('TranscriptBox', () => {
@@ -59,5 +78,17 @@ describe('TranscriptBox', () => {
     expect(parentClose).not.toHaveBeenCalled();
 
     document.removeEventListener('keydown', parentClose);
+  });
+
+  it('shows the expanded overlay fully visible (no enter animation) when prefers-reduced-motion is set', () => {
+    // DESIGN.md §6: with reduced motion the overlay must appear at its final
+    // opacity/scale synchronously rather than tweening in via rAF.
+    stubMatchMedia(true);
+    render(<TranscriptBox>content</TranscriptBox>);
+    fireEvent.click(screen.getByRole('button', { name: /expand/i }));
+    const dialog = screen.getByRole('dialog', { name: /transcript/i });
+    expect(dialog.className).toContain('opacity-100');
+    expect(dialog.className).toContain('scale-100');
+    expect(dialog.className).toContain('motion-reduce:transition-none');
   });
 });

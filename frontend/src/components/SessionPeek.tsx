@@ -82,12 +82,17 @@ export function SessionPeekContent({ loading, error, result, caption }: SessionP
   return (
     <TranscriptBox {...(caption !== undefined ? { caption } : {})}>
       <div className="space-y-6">
-        <p
-          className="text-label uppercase tracking-wider text-fg-faint tnum"
-          title={result.captured_at}
-        >
-          {formatShortDate(result.captured_at)}
-        </p>
+        {/* When a caption is shown it already carries "captured X ago", so the
+            standalone captured-date line would be a duplicate timestamp; render
+            it only when there is no caption (e.g. the run-node panel). */}
+        {caption === undefined && (
+          <p
+            className="text-label uppercase tracking-wider text-fg-faint tnum"
+            title={result.captured_at}
+          >
+            {formatShortDate(result.captured_at)}
+          </p>
+        )}
         <p className="text-label uppercase tracking-wider text-warn">▲ {PROMPT_INJECTION_NOTICE}</p>
         <ol className="space-y-5">
           {result.turns.map((turn, idx) => (
