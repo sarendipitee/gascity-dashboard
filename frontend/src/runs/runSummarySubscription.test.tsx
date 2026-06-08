@@ -184,6 +184,150 @@ describe('useRunSummarySubscription / RunSummaryProvider (gascity-dashboard-2j8e
     expect(screen.getByTestId('page').textContent).toBe('fresh:1');
   });
 
+  it('keeps the last-good summary as stale when a refresh errors (no blank on transient timeout)', async () => {
+    // The /runs UX bug: first paint renders lanes, then a background refresh
+    // times out under city load and used to OVERWRITE the good render with the
+    // full "Run data unavailable" error state. A transient refresh failure must
+    // retain the last-good snapshot, re-published as 'stale' (which RunMap and
+    // Runs.tsx render as data), not transition the view to 'error'.
+    mockFull.mockResolvedValue(buildRunSource('fresh', 2));
+
+    render(
+      <RunSummaryProvider>
+        <Consumer label="badge" />
+        <Consumer label="page" />
+      </RunSummaryProvider>,
+    );
+
+    // First good load lands.
+    await waitFor(() => expect(screen.getByTestId('badge').textContent).toBe('fresh:2'));
+
+    // A bead event triggers a refresh that resolves to an error source (the
+    // supervisor list timed out). Prior good data exists, so the published
+    // state must keep that data as 'stale', not flip to 'error'.
+    mockFull.mockResolvedValue({
+      source: 'runs',
+      status: 'error',
+      error: 'gc supervisor request timed out after 5000ms',
+    } satisfies SourceState<RunSummary>);
+    await act(async () => {
+      lastHookCall.onMatch?.();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('badge').textContent).toBe('stale:2'));
+    expect(screen.getByTestId('page').textContent).toBe('stale:2');
+  });
+
+  it('keeps the last-good summary as stale when a refresh throws', async () => {
+    mockFull.mockResolvedValue(buildRunSource('fresh', 3));
+
+    render(
+      <RunSummaryProvider>
+        <Consumer label="page" />
+      </RunSummaryProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId('page').textContent).toBe('fresh:3'));
+
+    // A refresh that rejects (rather than resolving to an error source) must
+    // also retain the last-good snapshot rather than latching the view dead.
+    mockFull.mockRejectedValue(new Error('gc supervisor request timed out after 5000ms'));
+    await act(async () => {
+      lastHookCall.onMatch?.();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('page').textContent).toBe('stale:3'));
+  });
+
+  it('self-recovers from a stale-retention: schedules a re-refresh that lands fresh with no SSE event', async () => {
+    // The latch bug: a good preview paints, then the one-time full refresh times
+    // out ONCE. Last-good retention keeps the view as 'stale' (good UX, never
+    // blanks) — but because the masked failure looked like a healthy snapshot to
+    // the retry path, nothing re-attempted, and the view stayed stuck on the
+    // preview-grade snapshot until some unrelated SSE event happened to fire.
+    // The fix decouples what we DISPLAY (stale, not blank) from whether we keep
+    // RETRYING (yes, with backoff). Here the full refresh fails once, then the
+    // backed-off re-refresh succeeds with full data — all driven by timers, with
+    // no SSE event in the test.
+    vi.useFakeTimers();
+    // Preview paints good data (blocked=4 stands in for preview-grade).
+    mockPreview.mockResolvedValue(buildRunSource('fresh', 4));
+    // The one-time full upgrade times out the FIRST time it is called...
+    mockFull.mockRejectedValueOnce(new Error('gc supervisor request timed out after 5000ms'));
+    // ...and every later attempt lands the full session-enriched snapshot.
+    mockFull.mockResolvedValue(buildRunSource('fresh', 7));
+
+    render(
+      <RunSummaryProvider>
+        <Consumer label="page" />
+      </RunSummaryProvider>,
+    );
+
+    // Preview lands, then the full refresh fails and is retained as 'stale' over
+    // the preview-grade data — the view shows data, never blanks.
+    await vi.waitFor(() => expect(screen.getByTestId('page').textContent).toBe('stale:4'));
+    // No SSE event has fired; the only thing that can recover us is the scheduled
+    // backoff re-refresh (first delay = 2_000ms).
+    expect(lastHookCall.onMatch).toBeTypeOf('function');
+
+    // Advance past the first backoff delay to fire the scheduled re-refresh,
+    // which now succeeds with the full snapshot.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+
+    // The view self-recovered to fresh, full data — no external SSE event.
+    await vi.waitFor(() => expect(screen.getByTestId('page').textContent).toBe('fresh:7'));
+  });
+
+  it('does not leak the recovery timer on unmount', async () => {
+    vi.useFakeTimers();
+    mockPreview.mockResolvedValue(buildRunSource('fresh', 4));
+    mockFull.mockRejectedValue(new Error('gc supervisor request timed out after 5000ms'));
+
+    const { unmount } = render(
+      <RunSummaryProvider>
+        <Consumer label="page" />
+      </RunSummaryProvider>,
+    );
+
+    // A stale-retention is published and a recovery timer is armed.
+    await vi.waitFor(() => expect(screen.getByTestId('page').textContent).toBe('stale:4'));
+    const fullCallsBeforeUnmount = mockFull.mock.calls.length;
+
+    unmount();
+
+    // After unmount, advancing well past the whole backoff budget must not fire
+    // any further refresh — the timer was cleaned up.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(mockFull.mock.calls.length).toBe(fullCallsBeforeUnmount);
+  });
+
+  it('surfaces error when the FIRST load fails with no prior good data', async () => {
+    // The genuine first-load failure is unchanged: with no prior snapshot to
+    // retain, the error state still surfaces so the operator is not shown an
+    // empty store as if it were healthy.
+    mockPreview.mockResolvedValue({
+      source: 'runs',
+      status: 'error',
+      error: 'formula runs unavailable',
+    } satisfies SourceState<RunSummary>);
+    mockFull.mockResolvedValue({
+      source: 'runs',
+      status: 'error',
+      error: 'formula runs unavailable',
+    } satisfies SourceState<RunSummary>);
+
+    render(
+      <RunSummaryProvider>
+        <Consumer label="page" />
+      </RunSummaryProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('page').textContent).toBe('error:-1'));
+  });
+
   it('throws when used outside a RunSummaryProvider', () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => renderHook(() => useRunSummary())).toThrow(/RunSummaryProvider/);
