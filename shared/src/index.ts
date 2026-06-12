@@ -43,6 +43,7 @@ export * from './operator.js';
 export * from './operator-mail.js';
 export * from './maintainer-sling.js';
 export * from './context-window.js';
+export * from './supervisor-proxy.js';
 export type * from './lists.js';
 export type * from './transcript.js';
 export type * from './dashboard-beads.js';
