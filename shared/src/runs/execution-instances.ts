@@ -139,7 +139,7 @@ function buildExecutionInstance(
 function preferredExecutionInstance(
   instances: RunExecutionInstance[],
 ): RunExecutionInstance | undefined {
-  return [...instances].sort(compareExecutionInstances).at(-1);
+  return [...instances].sort(compareVisiblePreference).at(-1);
 }
 
 function compareExecutionInstances(
@@ -151,6 +151,48 @@ function compareExecutionInstances(
     attemptOrder(left.attempt) - attemptOrder(right.attempt) ||
     left.beadId.localeCompare(right.beadId)
   );
+}
+
+// When (iteration, attempt) tie — e.g. a retry shell plus the attempt bead it
+// spawned — the visible instance must be the most-progressed one, not whichever
+// bead id sorts last. Otherwise a completed step renders as pending/ready for
+// the entire shell-close lag window (audit finding M7).
+function compareVisiblePreference(left: RunExecutionInstance, right: RunExecutionInstance): number {
+  return (
+    iterationOrder(left.iteration) - iterationOrder(right.iteration) ||
+    attemptOrder(left.attempt) - attemptOrder(right.attempt) ||
+    statusProgressOrder(left.status) - statusProgressOrder(right.status) ||
+    left.beadId.localeCompare(right.beadId)
+  );
+}
+
+// Lifecycle progress rank for the visible-instance tiebreak above. `blocked`
+// outranks `pending`: a blocked attempt is an operator-actionable state, so when
+// it ties (iteration, attempt) with its pending retry shell it must surface
+// instead of hiding behind the shell on the id tiebreak — the same id-order bug
+// (M7) this comparator removes for terminal/active/ready attempts. `blocked`
+// still ranks below `ready` because it is not yet runnable. `waiting` is the
+// client-derived calm relabel of a `pending` instance still gated on upstream
+// deps (applyDisplayNodeStates, shared/src/runs/display-state.ts), so it carries
+// no extra progress and ranks with `pending` at the bottom.
+function statusProgressOrder(status: RunExecutionInstance['status']): number {
+  switch (status) {
+    case 'completed':
+    case 'done':
+    case 'failed':
+    case 'skipped':
+      return 4;
+    case 'active':
+    case 'running':
+      return 3;
+    case 'ready':
+      return 2;
+    case 'blocked':
+      return 1;
+    case 'pending':
+    case 'waiting':
+      return 0;
+  }
 }
 
 function attemptSummaryFor(
