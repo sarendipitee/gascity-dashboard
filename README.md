@@ -98,18 +98,18 @@ non-zero exit always means a real regression.
 
 All knobs are environment variables. See [`backend/src/config.ts`](backend/src/config.ts) for the authoritative list.
 
-| Variable                    | Default                  | Purpose                                                                                                                                  |
-| --------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                      | `8081`                   | TCP port the dashboard listens on                                                                                                        |
-| `HOST`                      | `127.0.0.1`              | Ignored — the backend always binds loopback. Expose beyond localhost via your own auth proxy (see Security model).                       |
-| `ADMIN_EXTRA_ALLOWED_HOSTS` | (empty)                  | CSV of extra hostnames allowed in the `Host:` header (e.g. `my-vm,192.168.1.58`). The floor `127.0.0.1` / `localhost` is always allowed. |
-| `GC_SUPERVISOR_URL`         | `http://127.0.0.1:8372`  | gc supervisor API base URL.                                                                                                              |
-| `GC_CITY_NAME`              | `racoon-city`            | Name of the city this dashboard manages. One dashboard per city.                                                                         |
-| `MODULES_ENABLED`           | (empty)                  | CSV of optional first-party modules to mount, e.g. `maintainer`. Core views always mount.                                                |
-| `DEFAULT_VIEW`              | (empty)                  | Optional module/view id to use as the city default route.                                                                                |
-| `ADMIN_AUDIT_LOG_PATH`      | `$HOME/.gc/events.jsonl` | Where state-changing actions append audit entries.                                                                                       |
-| `ADMIN_FRONTEND_DIST`       | `../frontend/dist`       | Path to built frontend assets.                                                                                                           |
-| `ADMIN_DASHBOARD_DISABLED`  | `0`                      | Kill switch. Set to `1` to refuse to start.                                                                                              |
+| Variable                    | Default                  | Purpose                                                                                                                                                                                              |
+| --------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                      | `8081`                   | TCP port the dashboard listens on                                                                                                                                                                    |
+| `HOST`                      | `127.0.0.1`              | Ignored — the backend always binds loopback. Expose beyond localhost via your own auth proxy that rewrites `Host`+`Origin` to loopback — see the [Exposure runbook](specs/architecture/exposure.md). |
+| `ADMIN_EXTRA_ALLOWED_HOSTS` | (empty)                  | CSV of extra hostnames allowed in the `Host:` header (e.g. `my-vm,192.168.1.58`). The floor `127.0.0.1` / `localhost` is always allowed.                                                             |
+| `GC_SUPERVISOR_URL`         | `http://127.0.0.1:8372`  | gc supervisor API base URL.                                                                                                                                                                          |
+| `GC_CITY_NAME`              | `racoon-city`            | Name of the city this dashboard manages. One dashboard per city.                                                                                                                                     |
+| `MODULES_ENABLED`           | (empty)                  | CSV of optional first-party modules to mount, e.g. `maintainer`. Core views always mount.                                                                                                            |
+| `DEFAULT_VIEW`              | (empty)                  | Optional module/view id to use as the city default route.                                                                                                                                            |
+| `ADMIN_AUDIT_LOG_PATH`      | `$HOME/.gc/events.jsonl` | Where state-changing actions append audit entries.                                                                                                                                                   |
+| `ADMIN_FRONTEND_DIST`       | `../frontend/dist`       | Path to built frontend assets.                                                                                                                                                                       |
+| `ADMIN_DASHBOARD_DISABLED`  | `0`                      | Kill switch. Set to `1` to refuse to start.                                                                                                                                                          |
 
 For local dev a `.env.local` is convenient (not auto-loaded; source it explicitly):
 
@@ -129,7 +129,7 @@ Built for **single-operator** use on a **trusted network**.
 - **Content Security Policy** — `script-src 'self'` plus a hash for the static theme bootstrap, no arbitrary inline scripts, no `eval`.
 - **Exec whitelist** — every shell-out is enumerated explicitly in [`backend/src/exec.ts`](backend/src/exec.ts). There is no general-purpose command execution path.
 
-**Exposing beyond localhost is operator-owned.** The default needs zero config and ships no auth. To reach the dashboard remotely you front it with your **own** authenticated proxy (nginx/Caddy/Tailscale Serve/Cloudflare Access/etc.) — the dashboard stays on loopback. Optionally enable the server-enforced read-only gate (`DASHBOARD_READONLY=1`), keep the gc supervisor loopback-only and patched, and rate-limit at your proxy. Full runbook: [`specs/architecture/exposure.md`](specs/architecture/exposure.md).
+**Exposing beyond localhost is operator-owned.** The default needs zero config and ships no auth. To reach the dashboard remotely you front it with your **own** authenticated proxy (nginx/Caddy/Tailscale Serve/Cloudflare Access/etc.) — the dashboard stays on loopback. The front **must rewrite `Host` → `127.0.0.1` and `Origin` → `http://127.0.0.1:<port>`** before forwarding; forwarding the public values 403s every write and (if you "fix" it via `ADMIN_EXTRA_ALLOWED_HOSTS`) weakens the Origin belt — it is the #1 misconfiguration. Optionally enable the server-enforced read-only gate (`DASHBOARD_READONLY=1`), keep the gc supervisor loopback-only and patched, and rate-limit at your proxy. Full runbook: [`specs/architecture/exposure.md`](specs/architecture/exposure.md).
 
 Full threat model: [`specs/architecture/security.md`](specs/architecture/security.md).
 
