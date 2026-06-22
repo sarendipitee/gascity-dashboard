@@ -53,12 +53,57 @@ export function configureBackendDevProxy(proxy: BackendDevProxy): void {
   });
 }
 
+const DEV_PORT = 5174;
+
+// Optional tailnet exposure for mobile dev/QA over `tailscale serve`. The dev
+// server still binds 127.0.0.1 only — `tailscale serve` bridges the tailnet to
+// loopback — so this never widens the listener. When DEV_TAILNET_HOST is set we
+// (1) add that host to Vite's allowlist (its DNS-rebinding guard otherwise
+// answers a non-loopback Host with "Blocked request") and (2) point the HMR
+// client at the TLS serve endpoint so hot reload survives the proxy. Unset →
+// zero effect on normal loopback dev. While set, HMR targets the tailnet origin,
+// so iterate from the phone (or another serve port) rather than loopback.
+type TailnetDevServer = {
+  // Vite's ServerOptions types allowedHosts as string[] (mutable), so this is a
+  // fresh per-call array, never shared mutable state.
+  allowedHosts: string[];
+  hmr: { protocol: 'wss'; host: string; clientPort: number };
+};
+
+export function resolveTailnetDevServer(): TailnetDevServer | Record<string, never> {
+  const host = process.env.DEV_TAILNET_HOST?.trim();
+  if (host === undefined || host.length === 0) return {};
+  // The host becomes the sole entry in Vite's allowedHosts (its DNS-rebinding
+  // guard) and hmr.host. Require a real hostname so an operator typo like `*`,
+  // `true`, or `0.0.0.0` fails loudly here instead of silently widening the
+  // guard from one explicit tailnet name to "any host". A tailnet FQDN always
+  // has a dotted suffix and no wildcard. Mirrors DEV_BACKEND_TARGET's
+  // validate-at-load style above.
+  if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(host)) {
+    throw new Error(
+      `DEV_TAILNET_HOST must be a hostname (e.g. host.tailnet.ts.net); got ${JSON.stringify(host)}`,
+    );
+  }
+  // Strict port parse: Number.parseInt('5174abc') is 5174, which would silently
+  // accept malformed input; require an all-digits string so bad values throw.
+  const rawPort = process.env.DEV_TAILNET_PORT?.trim();
+  const clientPort =
+    rawPort === undefined ? DEV_PORT : /^\d+$/.test(rawPort) ? Number(rawPort) : NaN;
+  if (!Number.isInteger(clientPort) || clientPort < 1 || clientPort > 65535) {
+    throw new Error(
+      `DEV_TAILNET_PORT must be a valid port; got ${JSON.stringify(process.env.DEV_TAILNET_PORT)}`,
+    );
+  }
+  return { allowedHosts: [host], hmr: { protocol: 'wss', host, clientPort } };
+}
+
 export default defineConfig({
   plugins: [react()],
   server: {
-    port: 5174,
+    port: DEV_PORT,
     strictPort: true,
     host: '127.0.0.1',
+    ...resolveTailnetDevServer(),
     proxy: {
       '/api': {
         target: BACKEND_TARGET,
